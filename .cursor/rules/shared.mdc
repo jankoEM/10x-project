@@ -3,9 +3,9 @@ description:
 globs: 
 alwaysApply: true
 ---
-# AI Rules for {app-name}
+# AI Rules for Inflorai
 
-{project-description}
+InflorAI to narzędzie webowe, które automatyzuje konwersję niejednolitego tekstu z ofert resztkowych dostawców kwiatów na spójny cennik. Aplikacja umożliwia: wklejenie surowych danych, ustawienie globalnych parametrów cenowych, automatyczną ekstrakcję i przeliczenie pozycji, ręczną weryfikację w edytowalnym polu tekstowym oraz wygenerowanie finalnego cennika w prostym formacie tekstowym (z tabulatorami).
 
 ## Tech Stack
 

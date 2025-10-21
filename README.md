@@ -1,94 +1,60 @@
-# 10x Astro Starter
+# InflorAI
 
-A modern, opinionated starter template for building fast, accessible, and AI-friendly web applications.
+## Project Description
+InflorAI is a web tool that automates the conversion of non-uniform text offers from flower suppliers into a consistent, easy-to-read price list. The application allows users to:
+- Paste raw text data from supplier offers.
+- Set global pricing parameters, including currency conversion rates, net margins, and transport costs.
+- Automatically extract and recalculate item prices based on predefined rules.
+- Manually verify and edit the generated price list in an editable text field.
+- Generate a final price list in a tab-separated format.
+- Maintain a query history for authenticated users.
+
+This solution aims to reduce manual errors, increase efficiency, and provide a seamless experience in managing supplier offers.
 
 ## Tech Stack
+- **Frontend:** Astro 5, React 19, TypeScript 5, Tailwind CSS 4, Shadcn/ui
+- **Backend:** Supabase (PostgreSQL, authentication, and database services), Openrouter.ai for AI-enabled features
+- **CI/CD & Hosting:** GitHub Actions for continuous integration and DigitalOcean (via Docker) for deployment
 
-- [Astro](https://astro.build/) v5.5.5 - Modern web framework for building fast, content-focused websites
-- [React](https://react.dev/) v19.0.0 - UI library for building interactive components
-- [TypeScript](https://www.typescriptlang.org/) v5 - Type-safe JavaScript
-- [Tailwind CSS](https://tailwindcss.com/) v4.0.17 - Utility-first CSS framework
+## Getting Started Locally
+### Prerequisites
+- **Node.js:** Ensure you have Node.js version specified in `.nvmrc` (v22.14.0)
+- **Package Manager:** npm (or yarn, if preferred)
 
-## Prerequisites
-
-- Node.js v22.14.0 (as specified in `.nvmrc`)
-- npm (comes with Node.js)
-
-## Getting Started
-
+### Installation and Setup
 1. Clone the repository:
-
-```bash
-git clone https://github.com/przeprogramowani/10x-astro-starter.git
-cd 10x-astro-starter
-```
-
+   ```bash
+   git clone https://github.com/jankoEM/10x-project
+   cd your-repo
+   ```
 2. Install dependencies:
-
-```bash
-npm install
-```
-
-3. Run the development server:
-
-```bash
-npm run dev
-```
-
-4. Build for production:
-
-```bash
-npm run build
-```
+   ```bash
+   npm install
+   ```
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
 ## Available Scripts
+In the project directory, you can run:
+- **`npm run dev`**: Runs the app in development mode.
+- **`npm run build`**: Builds the app for production.
+- **`npm run preview`**: Serves the production build locally.
+- **`npm run astro`**: Runs Astro CLI commands.
+- **`npm run lint`**: Lints the project files.
+- **`npm run lint:fix`**: Lints and automatically fixes issues.
+- **`npm run format`**: Formats the codebase using Prettier.
 
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
-- `npm run lint` - Run ESLint
-- `npm run lint:fix` - Fix ESLint issues
+## Project Scope
+The MVP of InflorAI includes:
+- A user interface for pasting raw offer text and setting initial parameters.
+- Automatic extraction and pricing calculation based on rules (including VAT application, currency conversion, and cost adjustments for product dimensions).
+- Editable outputs in a text field allowing manual correction.
+- Basic user authentication and secure query history management.
+- Limitations: Advanced data validation, extensive error handling beyond the MVP scope, and integrations with external systems like ERP/CRM are not included.
 
-## Project Structure
-
-```md
-.
-├── src/
-│   ├── layouts/    # Astro layouts
-│   ├── pages/      # Astro pages
-│   │   └── api/    # API endpoints
-│   ├── components/ # UI components (Astro & React)
-│   └── assets/     # Static assets
-├── public/         # Public assets
-```
-
-## AI Development Support
-
-This project is configured with AI development tools to enhance the development experience, providing guidelines for:
-
-- Project structure
-- Coding practices
-- Frontend development
-- Styling with Tailwind
-- Accessibility best practices
-- Astro and React guidelines
-
-### Cursor IDE
-
-The project includes AI rules in `.cursor/rules/` directory that help Cursor IDE understand the project structure and provide better code suggestions.
-
-### GitHub Copilot
-
-AI instructions for GitHub Copilot are available in `.github/copilot-instructions.md`
-
-### Windsurf
-
-The `.windsurfrules` file contains AI configuration for Windsurf.
-
-## Contributing
-
-Please follow the AI guidelines and coding practices defined in the AI configuration files when contributing to this project.
-
+## Project Status
+This project is in the MVP phase under active development. 
 ## License
-
-MIT
+This project is licensed under the MIT License.

@@ -1,2225 +1,1405 @@
-# Architektura InflorAI - Dokument Techniczny
+# Architektura projektu InflorAI
 
-## 1. Przegląd Architektury
-
-### 1.1 Typ Aplikacji
-**InflorAI = Single-Purpose Web Application**
-
-Aplikacja webowa typu workflow tool z prostą autentykacją, umożliwiająca przetwarzanie tekstu przez AI, weryfikację danych w edytowalnym polu tekstowym oraz generowanie finalnego cennika.
-
-### 1.2 Architektura Wysokiego Poziomu
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Frontend Layer                            │
-│                 (Astro 5 + React 19 Islands)                     │
-│                                                                   │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │   Static    │  │   React      │  │   React      │           │
-│  │   Pages     │  │   Islands    │  │   Islands    │           │
-│  │  (Astro)    │  │ (Interactive)│  │ (Interactive)│           │
-│  └─────────────┘  └──────────────┘  └──────────────┘           │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                      Integration Layer                           │
-│                                                                   │
-│  ┌──────────────────┐              ┌─────────────────┐          │
-│  │  Supabase Client │              │ Openrouter API  │          │
-│  │   (Auth + DB)    │              │  (AI Provider)  │          │
-│  └──────────────────┘              └─────────────────┘          │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                       Backend Services                           │
-│                                                                   │
-│  ┌──────────────────┐              ┌─────────────────┐          │
-│  │    Supabase      │              │   Openrouter    │          │
-│  │    PostgreSQL    │              │   (Multi-LLM)   │          │
-│  │   + RLS + Auth   │              │                 │          │
-│  └──────────────────┘              └─────────────────┘          │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 1.3 Kluczowe Decyzje Architektoniczne
-
-#### A. **Hybrid Rendering (Astro + React Islands)**
-- **Astro pages** dla statycznych części (marketing, landing, login)
-- **React Islands** dla interaktywnych modułów (input, editor, configuration)
-- Minimalizacja JavaScript - tylko tam gdzie potrzebna interaktywność
-
-**Uzasadnienie:**
-- Lepsza wydajność dla stron statycznych (landing, login)
-- Możliwość SSR/SSG dla lepszego SEO (przyszłość: blog, docs)
-- Optymalna ilość JS (tylko w islands)
-
-#### B. **State Management Strategy**
-- **Zustand** dla globalnego stanu aplikacji (config, processing state)
-- **React Query** (TanStack Query) dla cache'owania API calls i synchronizacji z Supabase
-- **Local state** (useState) dla izolowanych komponentów
-- **Context API** dla współdzielenia stanu w ramach pojedynczego feature
-
-**Uzasadnienie:**
-- Zustand: lekki, prosty, bez boilerplate
-- React Query: automatyczny cache, refetch, optimistic updates
-- Unikamy prop drilling bez complexity Redux
-
-#### C. **Layered Architecture**
-```
-┌──────────────────────────────────────┐
-│   Presentation Layer (Components)    │  ← React Islands + Astro
-├──────────────────────────────────────┤
-│   Application Layer (Hooks + Logic)  │  ← Custom hooks, orchestration
-├──────────────────────────────────────┤
-│   Domain Layer (Services)            │  ← Business logic (pure functions)
-├──────────────────────────────────────┤
-│   Infrastructure Layer (API/DB)      │  ← Supabase, Openrouter clients
-└──────────────────────────────────────┘
-```
+## Spis treści
+1. [Przegląd architektury](#przegląd-architektury)
+2. [Warstwy aplikacji](#warstwy-aplikacji)
+3. [Struktura projektu](#struktura-projektu)
+4. [Komponenty UI - Atomic Design](#komponenty-ui---atomic-design)
+5. [Feature-based organizacja](#feature-based-organizacja)
+6. [Logika biznesowa](#logika-biznesowa)
+7. [Warstwa danych](#warstwa-danych)
+8. [Flow użytkownika](#flow-użytkownika)
+9. [Typy i DTOs](#typy-i-dtos)
+10. [Kluczowe decyzje architektoniczne](#kluczowe-decyzje-architektoniczne)
 
 ---
 
-## 2. Struktura Projektu
+## Przegląd architektury
 
-### 2.1 File System Architecture
-
-```
-10x-inflorai/
-├── .env.example                    # Environment variables template
-├── .env.local                      # Local env (gitignored)
-├── astro.config.mjs                # Astro configuration
-├── tailwind.config.cjs             # Tailwind configuration
-├── tsconfig.json                   # TypeScript configuration
-├── package.json
-├── README.md
-│
-├── public/                         # Static assets
-│   ├── favicon.svg
-│   └── images/
-│
-├── src/
-│   ├── env.d.ts                   # Astro environment types
-│   │
-│   ├── features/                  # Feature-based modules (Feature-First)
-│   │   ├── auth/
-│   │   │   ├── components/       # Feature-specific React components
-│   │   │   │   ├── LoginForm.tsx
-│   │   │   │   └── LogoutButton.tsx
-│   │   │   ├── hooks/            # Feature-specific hooks
-│   │   │   │   ├── useAuth.ts
-│   │   │   │   └── useSession.ts
-│   │   │   ├── services/         # Business logic
-│   │   │   │   └── authService.ts
-│   │   │   ├── api/              # Data access
-│   │   │   │   └── authApi.ts
-│   │   │   ├── types/            # Feature types
-│   │   │   │   └── index.ts
-│   │   │   └── store/            # Feature state (Zustand)
-│   │   │       └── authStore.ts
-│   │   │
-│   │   ├── input-processing/
-│   │   │   ├── components/
-│   │   │   │   ├── RawInputArea.tsx
-│   │   │   │   └── DatePicker.tsx
-│   │   │   ├── hooks/
-│   │   │   │   └── useInputProcessing.ts
-│   │   │   ├── services/
-│   │   │   │   ├── dateExtractor.ts
-│   │   │   │   └── inputValidator.ts
-│   │   │   ├── types/
-│   │   │   │   └── index.ts
-│   │   │   └── utils/
-│   │   │       └── textHelpers.ts
-│   │   │
-│   │   ├── configuration/
-│   │   │   ├── components/
-│   │   │   │   ├── ConfigPanel.tsx
-│   │   │   │   ├── CurrencyRatesForm.tsx
-│   │   │   │   ├── MarginForm.tsx
-│   │   │   │   └── VATForm.tsx
-│   │   │   ├── hooks/
-│   │   │   │   ├── useConfiguration.ts
-│   │   │   │   └── useConfigPersistence.ts
-│   │   │   ├── store/
-│   │   │   │   └── configStore.ts
-│   │   │   ├── services/
-│   │   │   │   └── configService.ts
-│   │   │   ├── api/
-│   │   │   │   └── configApi.ts
-│   │   │   └── types/
-│   │   │       └── index.ts
-│   │   │
-│   │   ├── extraction/
-│   │   │   ├── components/
-│   │   │   │   ├── ExtractionProgress.tsx
-│   │   │   │   └── ExtractionError.tsx
-│   │   │   ├── hooks/
-│   │   │   │   └── useExtraction.ts
-│   │   │   ├── services/
-│   │   │   │   ├── aiExtractor.ts
-│   │   │   │   ├── promptBuilder.ts
-│   │   │   │   └── responseParser.ts
-│   │   │   ├── api/
-│   │   │   │   └── openrouterApi.ts
-│   │   │   ├── prompts/
-│   │   │   │   ├── system-prompt.md
-│   │   │   │   └── few-shot-examples.ts
-│   │   │   └── types/
-│   │   │       └── index.ts
-│   │   │
-│   │   ├── validation/
-│   │   │   ├── components/
-│   │   │   │   ├── ValidationSummary.tsx
-│   │   │   │   └── ValidationBadge.tsx
-│   │   │   ├── hooks/
-│   │   │   │   └── useValidation.ts
-│   │   │   ├── services/
-│   │   │   │   ├── validator.ts
-│   │   │   │   └── issueDetector.ts
-│   │   │   ├── types/
-│   │   │   │   └── index.ts
-│   │   │   └── utils/
-│   │   │       └── validationRules.ts
-│   │   │
-│   │   ├── pricing/
-│   │   │   ├── components/
-│   │   │   │   └── PriceBreakdown.tsx
-│   │   │   ├── hooks/
-│   │   │   │   └── usePricing.ts
-│   │   │   ├── services/
-│   │   │   │   ├── priceCalculator.ts
-│   │   │   │   ├── currencyConverter.ts
-│   │   │   │   ├── marginCalculator.ts
-│   │   │   │   ├── transportCalculator.ts
-│   │   │   │   └── vatCalculator.ts
-│   │   │   ├── types/
-│   │   │   │   └── index.ts
-│   │   │   └── __tests__/
-│   │   │       └── priceCalculator.test.ts
-│   │   │
-│   │   ├── editor/
-│   │   │   ├── components/
-│   │   │   │   ├── TextEditor.tsx
-│   │   │   │   ├── EditorToolbar.tsx
-│   │   │   │   └── RowHighlighter.tsx
-│   │   │   ├── hooks/
-│   │   │   │   ├── useEditor.ts
-│   │   │   │   └── useEditorValidation.ts
-│   │   │   ├── services/
-│   │   │   │   ├── textParser.ts
-│   │   │   │   └── textFormatter.ts
-│   │   │   ├── store/
-│   │   │   │   └── editorStore.ts
-│   │   │   ├── types/
-│   │   │   │   └── index.ts
-│   │   │   └── utils/
-│   │   │       └── tabHelpers.ts
-│   │   │
-│   │   ├── output-generation/
-│   │   │   ├── components/
-│   │   │   │   ├── OutputPreview.tsx
-│   │   │   │   ├── GenerateButton.tsx
-│   │   │   │   └── WarningPopup.tsx
-│   │   │   ├── hooks/
-│   │   │   │   └── useOutputGeneration.ts
-│   │   │   ├── services/
-│   │   │   │   ├── outputFormatter.ts
-│   │   │   │   └── clipboardService.ts
-│   │   │   └── types/
-│   │   │       └── index.ts
-│   │   │
-│   │   ├── history/
-│   │   │   ├── components/
-│   │   │   │   ├── HistoryPanel.tsx
-│   │   │   │   ├── HistoryList.tsx
-│   │   │   │   ├── HistoryItem.tsx
-│   │   │   │   └── RestoreButton.tsx
-│   │   │   ├── hooks/
-│   │   │   │   ├── useHistory.ts
-│   │   │   │   └── useHistoryRestore.ts
-│   │   │   ├── services/
-│   │   │   │   └── historyService.ts
-│   │   │   ├── api/
-│   │   │   │   └── historyApi.ts
-│   │   │   └── types/
-│   │   │       └── index.ts
-│   │   │
-│   │   └── observability/
-│   │       ├── hooks/
-│   │       │   └── useDeltaTracking.ts
-│   │       ├── services/
-│   │       │   ├── deltaCalculator.ts
-│   │       │   └── metricsCollector.ts
-│   │       ├── api/
-│   │       │   └── metricsApi.ts
-│   │       └── types/
-│   │           └── index.ts
-│   │
-│   ├── components/                # Atomic Design - shared UI components
-│   │   ├── atoms/
-│   │   │   ├── Button.tsx
-│   │   │   ├── Input.tsx
-│   │   │   ├── Label.tsx
-│   │   │   ├── Badge.tsx
-│   │   │   ├── Spinner.tsx
-│   │   │   └── Alert.tsx
-│   │   │
-│   │   ├── molecules/
-│   │   │   ├── FormField.tsx
-│   │   │   ├── PriceInput.tsx
-│   │   │   ├── CurrencySelect.tsx
-│   │   │   ├── StatusBadge.tsx
-│   │   │   ├── SearchInput.tsx
-│   │   │   └── DateInput.tsx
-│   │   │
-│   │   ├── organisms/
-│   │   │   ├── Header.tsx
-│   │   │   ├── Sidebar.tsx
-│   │   │   ├── ProcessingWorkflow.tsx
-│   │   │   └── ErrorBoundary.tsx
-│   │   │
-│   │   └── templates/
-│   │       ├── AppTemplate.tsx
-│   │       ├── AuthTemplate.tsx
-│   │       └── DashboardTemplate.tsx
-│   │
-│   ├── layouts/                   # Astro layouts
-│   │   ├── BaseLayout.astro
-│   │   ├── AuthLayout.astro
-│   │   └── AppLayout.astro
-│   │
-│   ├── pages/                     # Astro pages (routing)
-│   │   ├── index.astro           # Landing page
-│   │   ├── login.astro           # Login page
-│   │   ├── dashboard.astro       # Main application
-│   │   └── 404.astro             # Not found
-│   │
-│   ├── lib/                       # Shared libraries & integrations
-│   │   ├── supabase/
-│   │   │   ├── client.ts         # Supabase browser client
-│   │   │   ├── server.ts         # Supabase server client (SSR)
-│   │   │   ├── database.types.ts # Generated types
-│   │   │   └── middleware.ts     # Auth middleware
-│   │   │
-│   │   ├── openrouter/
-│   │   │   ├── client.ts         # Openrouter API client
-│   │   │   ├── models.ts         # Model configurations
-│   │   │   └── errorHandler.ts   # API error handling
-│   │   │
-│   │   ├── types/                # Global TypeScript types
-│   │   │   ├── database.ts       # Database types
-│   │   │   ├── api.ts            # API request/response types
-│   │   │   └── domain.ts         # Domain models
-│   │   │
-│   │   └── constants/            # Global constants
-│   │       ├── pricing.ts        # Default pricing values
-│   │       ├── currencies.ts     # Currency definitions
-│   │       └── config.ts         # App configuration
-│   │
-│   ├── hooks/                     # Shared React hooks
-│   │   ├── useToast.ts
-│   │   ├── useLocalStorage.ts
-│   │   ├── useDebounce.ts
-│   │   └── useClickOutside.ts
-│   │
-│   ├── utils/                     # Global utilities
-│   │   ├── formatters.ts         # Number, date, currency formatters
-│   │   ├── validators.ts         # Input validators
-│   │   ├── calculations.ts       # Math helpers
-│   │   ├── parsers.ts            # String parsers
-│   │   └── cn.ts                 # Tailwind class merger
-│   │
-│   └── styles/
-│       └── globals.css           # Global styles + Tailwind
-│
-└── __tests__/                     # Test files
-    ├── unit/
-    ├── integration/
-    └── e2e/
-```
-
-### 2.2 Feature Module Pattern
-
-Każdy feature module jest self-contained i składa się z warstw:
-
-```
-feature/
-├── components/        # Presentation (React components)
-├── hooks/            # Application Logic (custom hooks)
-├── services/         # Domain Logic (pure functions)
-├── api/              # Infrastructure (API calls)
-├── store/            # State Management (Zustand)
-├── types/            # TypeScript definitions
-└── utils/            # Feature-specific utilities
-```
-
-**Przepływ danych w module:**
-```
-Component → Hook → Service → API → External Service
-    ↑                                      ↓
-    └──────────── State Update ────────────┘
-```
-
----
-
-## 3. Architektura Warstw
-
-### 3.1 Presentation Layer (Components)
-
-#### A. **Astro Pages** (Static/SSR)
-```astro
----
-// src/pages/dashboard.astro
-import AppLayout from '@/layouts/AppLayout.astro'
-import ProcessingWorkflow from '@/components/organisms/ProcessingWorkflow'
-import { supabase } from '@/lib/supabase/server'
-
-// SSR: Check auth
-const session = await supabase.auth.getSession()
-if (!session) return Astro.redirect('/login')
----
-
-<AppLayout title="InflorAI Dashboard">
-  <!-- Static header -->
-  <header class="...">
-    <h1>InflorAI - Automated Pricing</h1>
-  </header>
-
-  <!-- Interactive island -->
-  <ProcessingWorkflow client:load />
-</AppLayout>
-```
-
-#### B. **React Islands** (Interactive)
-```tsx
-// src/components/organisms/ProcessingWorkflow.tsx
-export default function ProcessingWorkflow() {
-  const { config } = useConfiguration()
-  const { extract, isLoading } = useExtraction()
-  const { rows } = useEditor()
-  
-  return (
-    <div className="workflow">
-      <RawInputArea />
-      <ConfigPanel />
-      <TextEditor rows={rows} />
-      <OutputPreview />
-    </div>
-  )
-}
-```
-
-**Island Loading Strategies:**
-```tsx
-// Load immediately (critical UI)
-<ConfigPanel client:load />
-
-// Load when visible (below fold)
-<HistoryPanel client:visible />
-
-// Load on interaction (modals, dropdowns)
-<WarningPopup client:idle />
-
-// No hydration (static only)
-<Header client:only="react" />
-```
-
-#### C. **Atomic Design Hierarchy**
-
-**Atoms** (podstawowe elementy):
-```tsx
-// src/components/atoms/Button.tsx
-import { cn } from '@/utils/cn'
-
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'danger'
-  size?: 'sm' | 'md' | 'lg'
-}
-
-export function Button({ variant = 'primary', size = 'md', className, ...props }: ButtonProps) {
-  return (
-    <button
-      className={cn(
-        'rounded font-medium transition-colors',
-        {
-          'bg-blue-600 text-white hover:bg-blue-700': variant === 'primary',
-          'bg-gray-200 text-gray-800 hover:bg-gray-300': variant === 'secondary',
-          'bg-red-600 text-white hover:bg-red-700': variant === 'danger',
-        },
-        {
-          'px-3 py-1 text-sm': size === 'sm',
-          'px-4 py-2 text-base': size === 'md',
-          'px-6 py-3 text-lg': size === 'lg',
-        },
-        className
-      )}
-      {...props}
-    />
-  )
-}
-```
-
-**Molecules** (kompozycje atomów):
-```tsx
-// src/components/molecules/FormField.tsx
-interface FormFieldProps {
-  label: string
-  error?: string
-  required?: boolean
-  children: React.ReactNode
-}
-
-export function FormField({ label, error, required, children }: FormFieldProps) {
-  return (
-    <div className="form-field">
-      <Label>
-        {label} {required && <span className="text-red-500">*</span>}
-      </Label>
-      {children}
-      {error && <Alert variant="error">{error}</Alert>}
-    </div>
-  )
-}
-```
-
-**Organisms** (złożone komponenty):
-```tsx
-// src/features/configuration/components/ConfigPanel.tsx
-export function ConfigPanel() {
-  const { config, updateConfig } = useConfiguration()
-  
-  return (
-    <div className="config-panel">
-      <h2>Global Parameters</h2>
-      
-      <section>
-        <h3>Currency Rates</h3>
-        <FormField label="EUR to PLN" required>
-          <Input 
-            type="number" 
-            value={config.eurRate} 
-            onChange={(e) => updateConfig({ eurRate: Number(e.target.value) })}
-          />
-        </FormField>
-        <FormField label="USD to PLN" required>
-          <Input 
-            type="number" 
-            value={config.usdRate} 
-            onChange={(e) => updateConfig({ usdRate: Number(e.target.value) })}
-          />
-        </FormField>
-      </section>
-      
-      {/* More sections... */}
-    </div>
-  )
-}
-```
-
-### 3.2 Application Layer (Hooks)
-
-Custom hooks orkiestrują logikę aplikacji:
-
-```tsx
-// src/features/extraction/hooks/useExtraction.ts
-import { useMutation } from '@tanstack/react-query'
-import { aiExtractor } from '../services/aiExtractor'
-import { useConfigStore } from '@/features/configuration/store/configStore'
-import { useEditorStore } from '@/features/editor/store/editorStore'
-
-export function useExtraction() {
-  const config = useConfigStore((state) => state.config)
-  const setRows = useEditorStore((state) => state.setRows)
-  
-  const mutation = useMutation({
-    mutationFn: async (rawInput: string) => {
-      // Call AI extraction service
-      const extracted = await aiExtractor.extract(rawInput, config)
-      return extracted
-    },
-    onSuccess: (data) => {
-      // Update editor with extracted data
-      setRows(data)
-    },
-    onError: (error) => {
-      console.error('Extraction failed:', error)
-      // Handle error...
-    }
-  })
-  
-  return {
-    extract: mutation.mutate,
-    isLoading: mutation.isPending,
-    error: mutation.error,
-    data: mutation.data
-  }
-}
-```
-
-### 3.3 Domain Layer (Services)
-
-Pure functions implementing business logic:
-
-```typescript
-// src/features/pricing/services/priceCalculator.ts
-import type { ExtractedRow, GlobalConfig, ComputedRow } from '../types'
-import { currencyConverter } from './currencyConverter'
-import { marginCalculator } from './marginCalculator'
-import { transportCalculator } from './transportCalculator'
-import { vatCalculator } from './vatCalculator'
-
-export class PriceCalculator {
-  /**
-   * Calculate all price components for a single row
-   */
-  static calculateRow(row: ExtractedRow, config: GlobalConfig): ComputedRow {
-    // 1. Convert base price to PLN
-    const basePricePln = currencyConverter.toPLN(
-      row.unitPriceValue,
-      row.unitPriceCurrency,
-      config
-    )
-    
-    // 2. Calculate margin based on length
-    const marginPln = marginCalculator.calculate(row.lengthCm, config)
-    
-    // 3. Calculate transport based on length
-    const transportPln = transportCalculator.calculate(row.lengthCm, config)
-    
-    // 4. Calculate net subtotal
-    const subtotalNetPln = basePricePln + marginPln + transportPln
-    
-    // 5. Calculate VAT
-    const vatPln = vatCalculator.calculate(subtotalNetPln, config.vatPercent)
-    
-    // 6. Calculate gross total
-    const totalGrossPln = subtotalNetPln + vatPln
-    
-    return {
-      ...row,
-      basePricePln,
-      marginPln,
-      transportPln,
-      subtotalNetPln,
-      vatPln,
-      totalGrossPln
-    }
-  }
-  
-  /**
-   * Recalculate all rows (used when config changes)
-   */
-  static recalculateAll(rows: ExtractedRow[], config: GlobalConfig): ComputedRow[] {
-    return rows.map(row => this.calculateRow(row, config))
-  }
-}
-```
-
-**Unit Test Example:**
-```typescript
-// src/features/pricing/__tests__/priceCalculator.test.ts
-import { describe, it, expect } from 'vitest'
-import { PriceCalculator } from '../services/priceCalculator'
-
-describe('PriceCalculator', () => {
-  const config = {
-    eurRate: 4.30,
-    usdRate: 3.80,
-    vatPercent: 8,
-    shortMarginPln: 0.40,
-    shortTransportPln: 1.32,
-    longMarginPln: 0.60,
-    longTransportPln: 1.42,
-    lengthThreshold: 60
-  }
-  
-  it('should calculate EUR price with short length correctly', () => {
-    const row = {
-      id: '1',
-      name: 'Rosa Grand Prix',
-      lengthCm: 50,
-      quantity: 10,
-      unitPriceValue: 2.50,
-      unitPriceCurrency: 'EUR' as const
-    }
-    
-    const result = PriceCalculator.calculateRow(row, config)
-    
-    // EUR 2.50 * 4.30 = 10.75 PLN
-    expect(result.basePricePln).toBe(10.75)
-    
-    // Short length: margin 0.40 + transport 1.32
-    expect(result.marginPln).toBe(0.40)
-    expect(result.transportPln).toBe(1.32)
-    
-    // Subtotal: 10.75 + 0.40 + 1.32 = 12.47
-    expect(result.subtotalNetPln).toBe(12.47)
-    
-    // VAT 8%: 12.47 * 0.08 = 0.9976
-    expect(result.vatPln).toBeCloseTo(1.00, 2)
-    
-    // Total: 12.47 + 1.00 = 13.47
-    expect(result.totalGrossPln).toBeCloseTo(13.47, 2)
-  })
-})
-```
-
-### 3.4 Infrastructure Layer (API/DB)
-
-#### A. **Supabase Integration**
-
-```typescript
-// src/lib/supabase/client.ts
-import { createClient } from '@supabase/supabase-js'
-import type { Database } from './database.types'
-
-const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY
-
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
-```
-
-```typescript
-// src/features/history/api/historyApi.ts
-import { supabase } from '@/lib/supabase/client'
-import type { ProcessingHistory, ProcessingHistoryInsert } from '../types'
-
-export class HistoryApi {
-  /**
-   * Save processing history to database
-   */
-  static async save(data: ProcessingHistoryInsert): Promise<ProcessingHistory> {
-    const { data: history, error } = await supabase
-      .from('processing_history')
-      .insert(data)
-      .select()
-      .single()
-    
-    if (error) throw error
-    return history
-  }
-  
-  /**
-   * Get all history for current user
-   */
-  static async getAll(): Promise<ProcessingHistory[]> {
-    const { data, error } = await supabase
-      .from('processing_history')
-      .select('*')
-      .order('created_at', { ascending: false })
-    
-    if (error) throw error
-    return data
-  }
-  
-  /**
-   * Get single history record
-   */
-  static async getById(id: string): Promise<ProcessingHistory> {
-    const { data, error } = await supabase
-      .from('processing_history')
-      .select('*')
-      .eq('id', id)
-      .single()
-    
-    if (error) throw error
-    return data
-  }
-}
-```
-
-#### B. **Openrouter Integration**
-
-```typescript
-// src/lib/openrouter/client.ts
-import type { ChatCompletionRequest, ChatCompletionResponse } from './types'
-
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const API_KEY = import.meta.env.OPENROUTER_API_KEY
-
-export class OpenrouterClient {
-  /**
-   * Send chat completion request
-   */
-  static async chatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': window.location.origin,
-        'X-Title': 'InflorAI'
-      },
-      body: JSON.stringify(request)
-    })
-    
-    if (!response.ok) {
-      throw new Error(`Openrouter API error: ${response.statusText}`)
-    }
-    
-    return response.json()
-  }
-}
-```
-
-```typescript
-// src/features/extraction/services/aiExtractor.ts
-import { OpenrouterClient } from '@/lib/openrouter/client'
-import { promptBuilder } from './promptBuilder'
-import { responseParser } from './responseParser'
-import type { ExtractedRow, GlobalConfig } from '../types'
-
-export class AiExtractor {
-  /**
-   * Extract structured data from raw text using AI
-   */
-  static async extract(rawInput: string, config: GlobalConfig): Promise<ExtractedRow[]> {
-    // Build prompt with few-shot examples
-    const prompt = promptBuilder.build(rawInput, config)
-    
-    // Call Openrouter API
-    const response = await OpenrouterClient.chatCompletion({
-      model: 'openai/gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: prompt.system
-        },
-        {
-          role: 'user',
-          content: prompt.user
-        }
-      ],
-      response_format: { type: 'json_object' }
-    })
-    
-    // Parse and validate response
-    const extracted = responseParser.parse(response.choices[0].message.content)
-    
-    return extracted
-  }
-}
-```
-
----
-
-## 4. State Management
-
-### 4.1 Global State (Zustand)
-
-```typescript
-// src/features/configuration/store/configStore.ts
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-import type { GlobalConfig } from '../types'
-
-interface ConfigState {
-  config: GlobalConfig
-  updateConfig: (partial: Partial<GlobalConfig>) => void
-  resetConfig: () => void
-}
-
-const DEFAULT_CONFIG: GlobalConfig = {
-  eurRate: 4.30,
-  usdRate: 3.80,
-  vatPercent: 8,
-  shortMarginPln: 0.40,
-  shortTransportPln: 1.32,
-  longMarginPln: 0.60,
-  longTransportPln: 1.42,
-  lengthThreshold: 60
-}
-
-export const useConfigStore = create<ConfigState>()(
-  persist(
-    (set) => ({
-      config: DEFAULT_CONFIG,
-      
-      updateConfig: (partial) => 
-        set((state) => ({ 
-          config: { ...state.config, ...partial } 
-        })),
-      
-      resetConfig: () => 
-        set({ config: DEFAULT_CONFIG })
-    }),
-    {
-      name: 'inflorai-config', // localStorage key
-    }
-  )
-)
-```
-
-```typescript
-// src/features/editor/store/editorStore.ts
-import { create } from 'zustand'
-import type { ExtractedRow } from '../types'
-
-interface EditorState {
-  rows: ExtractedRow[]
-  setRows: (rows: ExtractedRow[]) => void
-  updateRow: (id: string, updates: Partial<ExtractedRow>) => void
-  deleteRow: (id: string) => void
-  addRow: (row: ExtractedRow) => void
-}
-
-export const useEditorStore = create<EditorState>((set) => ({
-  rows: [],
-  
-  setRows: (rows) => set({ rows }),
-  
-  updateRow: (id, updates) => 
-    set((state) => ({
-      rows: state.rows.map(row => 
-        row.id === id ? { ...row, ...updates } : row
-      )
-    })),
-  
-  deleteRow: (id) => 
-    set((state) => ({
-      rows: state.rows.filter(row => row.id !== id)
-    })),
-  
-  addRow: (row) => 
-    set((state) => ({
-      rows: [...state.rows, row]
-    }))
-}))
-```
-
-### 4.2 Server State (React Query)
-
-```typescript
-// src/features/history/hooks/useHistory.ts
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { HistoryApi } from '../api/historyApi'
-import type { ProcessingHistoryInsert } from '../types'
-
-export function useHistory() {
-  const queryClient = useQueryClient()
-  
-  // Fetch all history
-  const query = useQuery({
-    queryKey: ['history'],
-    queryFn: HistoryApi.getAll,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  })
-  
-  // Save new history
-  const saveMutation = useMutation({
-    mutationFn: (data: ProcessingHistoryInsert) => HistoryApi.save(data),
-    onSuccess: () => {
-      // Invalidate and refetch
-      queryClient.invalidateQueries({ queryKey: ['history'] })
-    }
-  })
-  
-  return {
-    history: query.data ?? [],
-    isLoading: query.isLoading,
-    error: query.error,
-    save: saveMutation.mutate,
-    isSaving: saveMutation.isPending
-  }
-}
-```
-
-### 4.3 State Architecture Diagram
+InflorAI wykorzystuje **trzywarstwową architekturę** z separacją odpowiedzialności:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      React Components                        │
+│                    WARSTWA PREZENTACJI                       │
+│  (Astro Pages + React Components + Atomic Design)           │
+├─────────────────────────────────────────────────────────────┤
+│              WARSTWA LOGIKI BIZNESOWEJ                       │
+│     (Services + Helpers + Hooks + Constants)                │
+├─────────────────────────────────────────────────────────────┤
+│                   WARSTWA DANYCH                             │
+│    (Supabase + API Endpoints + Types + Integrations)        │
 └─────────────────────────────────────────────────────────────┘
-                              │
-                 ┌────────────┴────────────┐
-                 │                         │
-                 ↓                         ↓
-┌────────────────────────────┐  ┌────────────────────────┐
-│  Zustand (Client State)    │  │ React Query (Server)   │
-│  - Configuration           │  │ - History (Supabase)   │
-│  - Editor State            │  │ - User Data            │
-│  - UI State                │  │ - API Cache            │
-└────────────────────────────┘  └────────────────────────┘
-                 │                         │
-                 ↓                         ↓
-┌────────────────────────────┐  ┌────────────────────────┐
-│    localStorage            │  │   Supabase DB          │
-│    (persistence)           │  │   (PostgreSQL)         │
-└────────────────────────────┘  └────────────────────────┘
+```
+
+### Principia architektoniczne:
+- **Separation of Concerns** - każda warstwa ma jasno określoną odpowiedzialność
+- **Feature-based Split** - kod organizowany wokół funkcjonalności biznesowych
+- **Atomic Design** - komponenty UI budowane od najmniejszych elementów
+- **Type Safety** - TypeScript na każdym poziomie
+- **Testability** - struktura ułatwiająca testy jednostkowe i integracyjne
+- **Scalability** - łatwe dodawanie nowych feature'ów
+
+---
+
+## Warstwy aplikacji
+
+### 1. Warstwa prezentacji (Presentation Layer)
+
+**Odpowiedzialność:**
+- Renderowanie UI
+- Obsługa interakcji użytkownika
+- Wyświetlanie danych
+
+**Technologie:**
+- Astro 5 (strony, layouts, SSR)
+- React 19 (komponenty interaktywne)
+- Tailwind 4 (stylowanie)
+- Shadcn/ui (biblioteka komponentów)
+
+**Struktura:**
+```
+src/
+├── pages/           # Astro pages (routing)
+├── layouts/         # Astro layouts
+├── components/      # React/Astro components (Atomic Design + Features)
+```
+
+### 2. Warstwa logiki biznesowej (Business Logic Layer)
+
+**Odpowiedzialność:**
+- Logika przeliczeń cenowych
+- Parsowanie i ekstrakcja danych
+- Walidacja
+- Transformacja danych
+- Komunikacja z zewnętrznymi API
+
+**Technologie:**
+- TypeScript 5
+- Pure functions
+- Service pattern
+
+**Struktura:**
+```
+src/lib/
+├── services/        # Główna logika biznesowa
+├── helpers/         # Funkcje pomocnicze (pure functions)
+├── hooks/           # React hooks (bridge między UI a services)
+├── constants/       # Stałe i konfiguracja
+└── integrations/    # Klienty zewnętrznych API
+```
+
+### 3. Warstwa danych (Data Layer)
+
+**Odpowiedzialność:**
+- Dostęp do bazy danych
+- Definicje typów danych
+- API endpoints
+- Zarządzanie sesjami
+
+**Technologie:**
+- Supabase (PostgreSQL + Auth + SDK)
+- Astro API routes
+
+**Struktura:**
+```
+src/
+├── db/              # Supabase client i typy
+├── pages/api/       # API endpoints
+├── types.ts         # Shared types, DTOs, entities
+└── middleware/      # Astro middleware
 ```
 
 ---
 
-## 5. Data Flow
+## Struktura projektu
 
-### 5.1 Main Processing Flow
-
-```
-┌──────────────┐
-│   User       │
-│ Pastes Text  │
-└──────┬───────┘
-       │
-       ↓
-┌──────────────────────────────────────────────┐
-│ 1. Input Processing Feature                 │
-│    - Validate text not empty                 │
-│    - Extract date if present                 │
-│    - Store in input state                    │
-└──────┬───────────────────────────────────────┘
-       │
-       ↓
-┌──────────────────────────────────────────────┐
-│ 2. Configuration Feature                     │
-│    - Load config from Zustand store          │
-│    - Allow user to edit rates/margins        │
-└──────┬───────────────────────────────────────┘
-       │
-       ↓ (User clicks "Process")
-┌──────────────────────────────────────────────┐
-│ 3. Extraction Feature                        │
-│    - Build few-shot prompt                   │
-│    - Call Openrouter API (GPT-4o-mini)       │
-│    - Parse JSON response                     │
-│    - Validate structure                      │
-│    - Add unique IDs to rows                  │
-└──────┬───────────────────────────────────────┘
-       │
-       ↓
-┌──────────────────────────────────────────────┐
-│ 4. Validation Feature                        │
-│    - Check for missing required fields       │
-│    - Flag uncertain extractions              │
-│    - Generate issue list                     │
-└──────┬───────────────────────────────────────┘
-       │
-       ↓
-┌──────────────────────────────────────────────┐
-│ 5. Pricing Feature                           │
-│    - Calculate prices for all rows           │
-│    - Convert currencies                      │
-│    - Apply margins & transport               │
-│    - Calculate VAT                           │
-└──────┬───────────────────────────────────────┘
-       │
-       ↓
-┌──────────────────────────────────────────────┐
-│ 6. Editor Feature                            │
-│    - Display as editable text field          │
-│    - Highlight problematic rows              │
-│    - Allow manual corrections                │
-│    - Recalculate on edit                     │
-└──────┬───────────────────────────────────────┘
-       │
-       ↓ (User clicks "Generate")
-┌──────────────────────────────────────────────┐
-│ 7. Output Generation Feature                 │
-│    - Check for remaining issues              │
-│    - Show warning popup if issues exist      │
-│    - Format as tab-separated text            │
-│    - Enable copy/download                    │
-└──────┬───────────────────────────────────────┘
-       │
-       ↓
-┌──────────────────────────────────────────────┐
-│ 8. History Feature                           │
-│    - Save to Supabase                        │
-│    - Store: raw input, extracted data,       │
-│      edited text, final output               │
-└──────┬───────────────────────────────────────┘
-       │
-       ↓
-┌──────────────────────────────────────────────┐
-│ 9. Observability Feature                     │
-│    - Calculate delta (auto vs final)         │
-│    - Log to Supabase                         │
-│    - Track metrics                           │
-└──────────────────────────────────────────────┘
-```
-
-### 5.2 Edit Flow (Real-time Recalculation)
+### Kompletna struktura katalogów:
 
 ```
-User edits cell in text editor
-       │
-       ↓
-onChange event fired
-       │
-       ↓
-Parse text → array of rows
-       │
-       ↓
-Update editorStore.rows
-       │
-       ↓
-useMemo triggers recalculation
-       │
-       ↓
-PriceCalculator.recalculateAll()
-       │
-       ↓
-UI re-renders with new prices
-```
+src/
+├── assets/                        # Statyczne assety wewnętrzne
+│
+├── components/                    # Komponenty React/Astro
+│   ├── ui/                        # Shadcn/ui components (atoms)
+│   │   ├── button.tsx
+│   │   ├── input.tsx
+│   │   ├── card.tsx
+│   │   ├── table.tsx
+│   │   ├── dialog.tsx
+│   │   ├── tabs.tsx
+│   │   └── ...
+│   │
+│   ├── atoms/                     # Custom atomic components
+│   │   ├── CurrencyBadge.tsx     # Badge z symbolem waluty
+│   │   ├── StatusIndicator.tsx   # Wskaźnik statusu (error/warning/success)
+│   │   ├── ValidationMessage.tsx # Komunikat walidacji
+│   │   ├── LoadingSpinner.tsx    # Spinner ładowania
+│   │   └── ErrorBoundary.tsx     # Error boundary
+│   │
+│   ├── molecules/                 # Kombinacje atoms
+│   │   ├── FormField.tsx         # Label + Input + Error
+│   │   ├── CurrencyInput.tsx     # Input z wyborem waluty
+│   │   ├── DateSelector.tsx      # Data picker z validacją
+│   │   ├── TableCell.tsx         # Komórka tabeli z edycją
+│   │   ├── ActionButton.tsx      # Button z ikoną i stanem
+│   │   └── SearchBar.tsx         # Search input z ikoną
+│   │
+│   ├── organisms/                 # Złożone komponenty
+│   │   ├── EditableTable.tsx     # Tabela z edycją in-place
+│   │   ├── PricingConfigForm.tsx # Formularz konfiguracji
+│   │   ├── TextInputArea.tsx     # Textarea z formatowaniem
+│   │   ├── ValidationPopup.tsx   # Popup z listą błędów
+│   │   ├── DataGrid.tsx          # Grid z sortowaniem/filtrowaniem
+│   │   └── NavigationBar.tsx     # Top navigation
+│   │
+│   └── features/                  # Feature-specific components
+│       ├── auth/
+│       │   ├── LoginForm.tsx
+│       │   ├── LogoutButton.tsx
+│       │   └── AuthGuard.tsx
+│       │
+│       ├── input/
+│       │   ├── RawTextInput.tsx
+│       │   ├── DateSelector.tsx
+│       │   └── InputPreview.tsx
+│       │
+│       ├── pricing/
+│       │   ├── CurrencyRateEditor.tsx
+│       │   ├── MarginEditor.tsx
+│       │   ├── TransportCostEditor.tsx
+│       │   ├── VATEditor.tsx
+│       │   └── PricingPreview.tsx
+│       │
+│       ├── extraction/
+│       │   ├── ExtractionResults.tsx
+│       │   ├── ExtractionProgress.tsx
+│       │   └── ExtractionStats.tsx
+│       │
+│       ├── editing/
+│       │   ├── DataTable.tsx
+│       │   ├── EditableTextField.tsx
+│       │   ├── RowActions.tsx
+│       │   ├── BulkActions.tsx
+│       │   └── ValidationIndicators.tsx
+│       │
+│       ├── generation/
+│       │   ├── PriceListPreview.tsx
+│       │   ├── ExportActions.tsx
+│       │   ├── GenerationWarning.tsx
+│       │   └── CopyToClipboard.tsx
+│       │
+│       └── history/
+│           ├── HistorySidebar.tsx
+│           ├── HistoryPanel.tsx
+│           ├── HistoryItem.tsx
+│           ├── HistoryFilters.tsx
+│           └── HistoryRestore.tsx
+│
+├── db/                            # Database layer
+│   ├── supabase.client.ts        # Supabase client initialization
+│   └── database.types.ts         # Generated types from Supabase
+│
+├── layouts/                       # Astro layouts
+│   ├── BaseLayout.astro          # Base HTML structure
+│   ├── AuthLayout.astro          # Layout dla auth pages
+│   └── AppLayout.astro           # Layout dla głównej aplikacji
+│
+├── lib/                          # Business logic layer
+│   ├── services/                 # Services (business logic)
+│   │   ├── auth/
+│   │   │   └── auth.service.ts
+│   │   │
+│   │   ├── extraction/
+│   │   │   ├── ai-extraction.service.ts
+│   │   │   ├── text-parser.service.ts
+│   │   │   └── field-extractor.service.ts
+│   │   │
+│   │   ├── pricing/
+│   │   │   ├── currency-converter.service.ts
+│   │   │   ├── price-calculator.service.ts
+│   │   │   ├── margin-calculator.service.ts
+│   │   │   ├── transport-calculator.service.ts
+│   │   │   └── vat-calculator.service.ts
+│   │   │
+│   │   ├── validation/
+│   │   │   ├── data-validator.service.ts
+│   │   │   ├── completeness-checker.service.ts
+│   │   │   └── format-validator.service.ts
+│   │   │
+│   │   ├── generation/
+│   │   │   ├── pricelist-generator.service.ts
+│   │   │   └── text-formatter.service.ts
+│   │   │
+│   │   ├── history/
+│   │   │   └── history.service.ts
+│   │   │
+│   │   └── metrics/
+│   │       └── delta-logger.service.ts
+│   │
+│   ├── helpers/                  # Helper functions (pure)
+│   │   ├── format.helpers.ts    # Formatowanie liczb, dat, walut
+│   │   ├── parse.helpers.ts     # Parsowanie tekstów
+│   │   ├── validation.helpers.ts # Walidacje
+│   │   ├── currency.helpers.ts   # Operacje na walutach
+│   │   └── date.helpers.ts       # Operacje na datach
+│   │
+│   ├── hooks/                    # React hooks
+│   │   ├── useAuth.ts
+│   │   ├── usePricing.ts
+│   │   ├── useExtraction.ts
+│   │   ├── useEditing.ts
+│   │   ├── useHistory.ts
+│   │   ├── useValidation.ts
+│   │   └── usePriceListGeneration.ts
+│   │
+│   ├── constants/                # Constants & configuration
+│   │   ├── pricing.constants.ts  # Domyślne kursy, marże, VAT
+│   │   ├── validation.constants.ts # Reguły walidacji
+│   │   ├── currencies.constants.ts # Definicje walut
+│   │   └── app.constants.ts      # Ogólne stałe
+│   │
+│   └── integrations/             # External API clients
+│       └── openrouter/
+│           ├── openrouter.client.ts
+│           ├── prompts.ts
+│           └── types.ts
+│
+├── middleware/                   # Astro middleware
+│   └── index.ts                  # Auth + Supabase injection
+│
+├── pages/                        # Astro pages (routing)
+│   ├── index.astro              # Landing/redirect
+│   ├── login.astro              # Strona logowania
+│   │
+│   ├── app/                     # Główna aplikacja
+│   │   └── index.astro          # Multi-step workflow
+│   │
+│   └── api/                     # API endpoints
+│       ├── auth/
+│       │   ├── login.ts
+│       │   └── logout.ts
+│       │
+│       ├── extraction/
+│       │   └── parse.ts         # AI extraction endpoint
+│       │
+│       ├── pricelist/
+│       │   ├── calculate.ts     # Przeliczanie cen
+│       │   ├── generate.ts      # Generowanie cennika
+│       │   └── export.ts        # Eksport pliku
+│       │
+│       └── history/
+│           ├── list.ts          # Lista historii
+│           ├── get.ts           # Pojedynczy wpis
+│           ├── save.ts          # Zapis nowego
+│           └── delete.ts        # Usunięcie wpisu
+│
+├── styles/                       # Global styles
+│   └── globals.css              # Tailwind + custom CSS
+│
+├── types.ts                     # Shared types, DTOs, Entities
+├── env.d.ts                     # TypeScript env definitions
+└── middleware.ts                # Middleware entry point
 
-### 5.3 History Restore Flow
+public/                          # Statyczne pliki publiczne
+├── favicon.ico
+└── images/
 
-```
-User clicks "Restore" in HistoryPanel
-       │
-       ↓
-Fetch history record from Supabase
-       │
-       ↓
-Load saved data:
-  - Raw input → inputStore
-  - Edited text → editorStore
-  - Config → configStore
-       │
-       ↓
-Trigger recalculation
-       │
-       ↓
-UI updates with restored state
-```
+supabase/                        # Supabase configuration
+├── config.toml
+└── migrations/                  # Database migrations
+    └── ...
 
----
-
-## 6. Database Schema (Supabase)
-
-### 6.1 Tables
-
-```sql
--- Users table (Supabase Auth automatic)
--- supabase.auth.users
-
--- User configurations (optional, for future)
-CREATE TABLE user_configurations (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  eur_rate NUMERIC(10, 2) DEFAULT 4.30,
-  usd_rate NUMERIC(10, 2) DEFAULT 3.80,
-  vat_percent NUMERIC(5, 2) DEFAULT 8.00,
-  short_margin_pln NUMERIC(10, 2) DEFAULT 0.40,
-  short_transport_pln NUMERIC(10, 2) DEFAULT 1.32,
-  long_margin_pln NUMERIC(10, 2) DEFAULT 0.60,
-  long_transport_pln NUMERIC(10, 2) DEFAULT 1.42,
-  length_threshold_cm INTEGER DEFAULT 60,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  
-  UNIQUE(user_id)
-);
-
--- Processing history
-CREATE TABLE processing_history (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  
-  -- Input stage
-  raw_input TEXT NOT NULL,
-  default_date DATE,
-  
-  -- Extraction stage
-  extracted_data JSONB NOT NULL,  -- Array of ExtractedRow
-  
-  -- Editing stage
-  edited_text TEXT NOT NULL,       -- Tab-separated text after user edits
-  
-  -- Output stage
-  final_output TEXT NOT NULL,      -- Final generated pricelist
-  
-  -- Metadata
-  config_snapshot JSONB NOT NULL,  -- GlobalConfig at time of processing
-  delta JSONB,                     -- Changes between auto and final
-  
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  
-  -- Indexes for performance
-  INDEX idx_user_created (user_id, created_at DESC)
-);
-
--- Row Level Security
-ALTER TABLE user_configurations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE processing_history ENABLE ROW LEVEL SECURITY;
-
--- RLS Policies
-CREATE POLICY "Users can read own config"
-  ON user_configurations FOR SELECT
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own config"
-  ON user_configurations FOR UPDATE
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can read own history"
-  ON processing_history FOR SELECT
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert own history"
-  ON processing_history FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
-```
-
-### 6.2 TypeScript Types (Generated)
-
-```bash
-# Generate types from Supabase schema
-npx supabase gen types typescript --project-id YOUR_PROJECT_ID > src/lib/supabase/database.types.ts
-```
-
-```typescript
-// src/lib/supabase/database.types.ts (generated)
-export interface Database {
-  public: {
-    Tables: {
-      user_configurations: {
-        Row: {
-          id: string
-          user_id: string
-          eur_rate: number
-          usd_rate: number
-          // ... etc
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          eur_rate?: number
-          // ... etc
-        }
-        Update: {
-          eur_rate?: number
-          // ... etc
-        }
-      }
-      processing_history: {
-        Row: {
-          id: string
-          user_id: string
-          raw_input: string
-          extracted_data: Json
-          // ... etc
-        }
-        // ... Insert, Update
-      }
-    }
-  }
-}
+.ai/                             # AI/Documentation files
+├── prd.md
+├── stack.md
+└── architecture.md (ten plik)
 ```
 
 ---
 
-## 7. Routing & Navigation
+## Komponenty UI - Atomic Design
 
-### 7.1 File-based Routing (Astro)
+### Poziomy komponentów:
 
-```
-src/pages/
-├── index.astro              → /             (landing page)
-├── login.astro              → /login        (authentication)
-├── dashboard.astro          → /dashboard    (main app)
-└── 404.astro                → /404          (not found)
-```
+#### **Atoms** (src/components/ui + src/components/atoms)
+Najmniejsze, niepodzielne komponenty:
+- Button, Input, Label, Badge, Icon
+- CurrencyBadge, StatusIndicator, LoadingSpinner
 
-### 7.2 Protected Routes
+**Zasady:**
+- Brak logiki biznesowej
+- Tylko props i stylowanie
+- Maksymalna reużywalność
 
-```astro
----
-// src/pages/dashboard.astro
-import { supabase } from '@/lib/supabase/server'
-
-const { data: { session } } = await supabase.auth.getSession()
-
-if (!session) {
-  return Astro.redirect('/login')
-}
----
-```
-
-### 7.3 Client-side Navigation
-
+**Przykład:**
 ```tsx
-// src/features/auth/components/LogoutButton.tsx
-import { supabase } from '@/lib/supabase/client'
+// components/atoms/CurrencyBadge.tsx
+interface CurrencyBadgeProps {
+  currency: 'EUR' | 'USD' | 'PLN';
+  variant?: 'default' | 'outlined';
+}
 
-export function LogoutButton() {
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    window.location.href = '/login'
-  }
-  
-  return <Button onClick={handleLogout}>Logout</Button>
+export function CurrencyBadge({ currency, variant = 'default' }: CurrencyBadgeProps) {
+  return <Badge variant={variant}>{currency}</Badge>;
 }
 ```
 
----
+#### **Molecules** (src/components/molecules)
+Kombinacje atoms tworzące funkcjonalne jednostki:
+- FormField (Label + Input + Error)
+- CurrencyInput (Input + CurrencySelect)
+- DateSelector (DatePicker + Validation)
 
-## 8. Authentication Flow
+**Zasady:**
+- Minimalna logika (głównie UI state)
+- Kompozycja atoms
+- Konkretny cel użycia
 
-### 8.1 Login Flow
-
-```
-1. User navigates to /login
-2. LoginForm component renders
-3. User enters email + password
-4. Call supabase.auth.signInWithPassword()
-5. On success: redirect to /dashboard
-6. On error: show error message
-```
-
+**Przykład:**
 ```tsx
-// src/features/auth/components/LoginForm.tsx
-import { useState } from 'react'
-import { supabase } from '@/lib/supabase/client'
-import { Button, Input, Alert } from '@/components/atoms'
+// components/molecules/CurrencyInput.tsx
+interface CurrencyInputProps {
+  value: number;
+  currency: Currency;
+  onValueChange: (value: number) => void;
+  onCurrencyChange: (currency: Currency) => void;
+}
 
-export function LoginForm() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
-    
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    })
-    
-    if (error) {
-      setError(error.message)
-      setLoading(false)
-    } else {
-      window.location.href = '/dashboard'
-    }
-  }
+export function CurrencyInput({...props}: CurrencyInputProps) {
+  return (
+    <div className="flex gap-2">
+      <Input type="number" value={props.value} onChange={...} />
+      <Select value={props.currency} onValueChange={...}>
+        <SelectItem value="EUR">EUR</SelectItem>
+        <SelectItem value="USD">USD</SelectItem>
+        <SelectItem value="PLN">PLN</SelectItem>
+      </Select>
+    </div>
+  );
+}
+```
+
+#### **Organisms** (src/components/organisms)
+Złożone, samodzielne sekcje UI:
+- EditableTable (tabela z edycją, sortowaniem, filtrowaniem)
+- PricingConfigForm (kompletny formularz konfiguracji)
+- ValidationPopup (popup z listą błędów i akcjami)
+
+**Zasady:**
+- Mogą zawierać local state
+- Kompozycja molecules i atoms
+- Samodzielne funkcjonalności
+
+**Przykład:**
+```tsx
+// components/organisms/EditableTable.tsx
+interface EditableTableProps {
+  data: TableRow[];
+  onRowChange: (index: number, row: TableRow) => void;
+  onRowDelete: (index: number) => void;
+  validationErrors: ValidationError[];
+}
+
+export function EditableTable({...props}: EditableTableProps) {
+  // Logika tabeli, sortowanie, edycja
+  return <Table>...</Table>;
+}
+```
+
+#### **Features** (src/components/features)
+Komponenty specyficzne dla domeny biznesowej:
+- LoginForm, HistorySidebar, DataTable
+- Połączenie UI z business logic przez hooks
+
+**Zasady:**
+- Używają hooks do łączenia z services
+- Kompozycja organisms, molecules, atoms
+- Domain-specific logic
+
+**Przykład:**
+```tsx
+// components/features/pricing/CurrencyRateEditor.tsx
+export function CurrencyRateEditor() {
+  const { rates, updateRate } = usePricing();
   
   return (
-    <form onSubmit={handleSubmit}>
-      <Input
-        type="email"
-        placeholder="Email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        required
-      />
-      <Input
-        type="password"
-        placeholder="Password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        required
-      />
-      {error && <Alert variant="error">{error}</Alert>}
-      <Button type="submit" disabled={loading}>
-        {loading ? 'Loading...' : 'Login'}
-      </Button>
-    </form>
-  )
-}
-```
-
-### 8.2 Session Management
-
-```tsx
-// src/features/auth/hooks/useSession.ts
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase/client'
-import type { Session } from '@supabase/supabase-js'
-
-export function useSession() {
-  const [session, setSession] = useState<Session | null>(null)
-  const [loading, setLoading] = useState(true)
-  
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setLoading(false)
-    })
-    
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session)
-      }
-    )
-    
-    return () => subscription.unsubscribe()
-  }, [])
-  
-  return { session, loading }
+    <Card>
+      <CardHeader>
+        <CardTitle>Kursy walut</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <CurrencyInput 
+          currency="EUR" 
+          value={rates.EUR}
+          onValueChange={(v) => updateRate('EUR', v)}
+        />
+        {/* ... */}
+      </CardContent>
+    </Card>
+  );
 }
 ```
 
 ---
 
-## 9. Error Handling Strategy
+## Feature-based organizacja
 
-### 9.1 Error Types
+### Podział na domeny funkcjonalne (features):
+
+```
+features/
+├── auth/              # Autentykacja
+├── input/             # Wejście danych
+├── pricing/           # Konfiguracja cenowa
+├── extraction/        # Ekstrakcja AI
+├── editing/           # Edycja danych
+├── generation/        # Generowanie cennika
+└── history/           # Historia operacji
+```
+
+### Każdy feature zawiera:
+- **Components** - w `components/features/{feature}/`
+- **Services** - w `lib/services/{feature}/`
+- **Hooks** - w `lib/hooks/use{Feature}.ts`
+- **Types** - w `types.ts` (sekcja dla feature)
+
+### Przykład: Feature "Pricing"
+
+```
+components/features/pricing/
+├── CurrencyRateEditor.tsx
+├── MarginEditor.tsx
+├── TransportCostEditor.tsx
+├── VATEditor.tsx
+└── PricingPreview.tsx
+
+lib/services/pricing/
+├── currency-converter.service.ts
+├── price-calculator.service.ts
+├── margin-calculator.service.ts
+├── transport-calculator.service.ts
+└── vat-calculator.service.ts
+
+lib/hooks/
+└── usePricing.ts
+
+types.ts (fragment):
+// Pricing Feature Types
+export interface PricingConfig { ... }
+export interface CurrencyRate { ... }
+export interface MarginConfig { ... }
+```
+
+---
+
+## Logika biznesowa
+
+### Services (src/lib/services)
+
+Services zawierają główną logikę biznesową. Są to pure functions lub klasy z metodami.
+
+**Zasady:**
+- Brak zależności od UI
+- Testowalne w izolacji
+- Single Responsibility Principle
+- Explicit dependencies (dependency injection)
+
+#### Przykłady services:
+
+##### 1. Price Calculator Service
+```typescript
+// lib/services/pricing/price-calculator.service.ts
+
+import type { PricingConfig, ProductData, CalculatedPrice } from '@/types';
+import { currencyConverter } from './currency-converter.service';
+import { marginCalculator } from './margin-calculator.service';
+import { transportCalculator } from './transport-calculator.service';
+import { vatCalculator } from './vat-calculator.service';
+
+export const priceCalculator = {
+  calculateFinalPrice(
+    product: ProductData,
+    config: PricingConfig
+  ): CalculatedPrice {
+    // 1. Konwersja ceny bazowej na PLN
+    const basePricePLN = currencyConverter.convert(
+      product.basePrice,
+      product.currency,
+      config.rates
+    );
+
+    // 2. Obliczenie marży netto
+    const marginNet = marginCalculator.calculate(
+      product.length,
+      config.margins
+    );
+
+    // 3. Obliczenie transportu netto
+    const transportNet = transportCalculator.calculate(
+      product.length,
+      config.transportCosts
+    );
+
+    // 4. Suma netto
+    const totalNet = basePricePLN + marginNet + transportNet;
+
+    // 5. VAT
+    const vatAmount = vatCalculator.calculate(totalNet, config.vatRate);
+
+    // 6. Cena końcowa brutto
+    const finalPrice = totalNet + vatAmount;
+
+    return {
+      basePricePLN,
+      marginNet,
+      transportNet,
+      totalNet,
+      vatAmount,
+      finalPrice,
+    };
+  },
+};
+```
+
+##### 2. AI Extraction Service
+```typescript
+// lib/services/extraction/ai-extraction.service.ts
+
+import type { RawInputDTO, ExtractedDataDTO } from '@/types';
+import { openRouterClient } from '@/lib/integrations/openrouter/openrouter.client';
+import { EXTRACTION_PROMPT } from '@/lib/integrations/openrouter/prompts';
+
+export const aiExtractionService = {
+  async extractData(rawInput: RawInputDTO): Promise<ExtractedDataDTO> {
+    const response = await openRouterClient.complete({
+      prompt: EXTRACTION_PROMPT,
+      userInput: rawInput.text,
+      examples: FEW_SHOT_EXAMPLES,
+    });
+
+    // Parsowanie odpowiedzi AI
+    const extracted = this.parseAIResponse(response);
+
+    return extracted;
+  },
+
+  parseAIResponse(response: string): ExtractedDataDTO {
+    // Logika parsowania JSON z odpowiedzi AI
+    // Obsługa błędów i walidacja struktury
+    // ...
+  },
+};
+```
+
+##### 3. Validation Service
+```typescript
+// lib/services/validation/data-validator.service.ts
+
+import type { ExtractedRow, ValidationError } from '@/types';
+
+export const dataValidator = {
+  validateRow(row: ExtractedRow): ValidationError[] {
+    const errors: ValidationError[] = [];
+
+    if (!row.name || row.name.trim() === '') {
+      errors.push({
+        field: 'name',
+        message: 'Brak nazwy produktu',
+        severity: 'error',
+      });
+    }
+
+    if (!row.quantity || row.quantity <= 0) {
+      errors.push({
+        field: 'quantity',
+        message: 'Nieprawidłowa ilość',
+        severity: 'error',
+      });
+    }
+
+    if (!row.basePrice || row.basePrice <= 0) {
+      errors.push({
+        field: 'basePrice',
+        message: 'Brak lub nieprawidłowa cena',
+        severity: 'error',
+      });
+    }
+
+    if (!row.length) {
+      errors.push({
+        field: 'length',
+        message: 'Brak długości - użyto domyślnej marży',
+        severity: 'warning',
+      });
+    }
+
+    return errors;
+  },
+
+  validateAllRows(rows: ExtractedRow[]): Map<number, ValidationError[]> {
+    const validationResults = new Map<number, ValidationError[]>();
+
+    rows.forEach((row, index) => {
+      const errors = this.validateRow(row);
+      if (errors.length > 0) {
+        validationResults.set(index, errors);
+      }
+    });
+
+    return validationResults;
+  },
+
+  hasBlockingErrors(errors: ValidationError[]): boolean {
+    return errors.some((e) => e.severity === 'error');
+  },
+};
+```
+
+### Helpers (src/lib/helpers)
+
+Helpers to pure functions bez side effects. Używane przez services i components.
+
+**Przykłady:**
 
 ```typescript
-// src/lib/types/errors.ts
-export class AppError extends Error {
-  constructor(
-    message: string,
-    public code: string,
-    public statusCode?: number
-  ) {
-    super(message)
-    this.name = 'AppError'
-  }
-}
+// lib/helpers/format.helpers.ts
 
-export class APIError extends AppError {
-  constructor(message: string, statusCode: number) {
-    super(message, 'API_ERROR', statusCode)
-    this.name = 'APIError'
-  }
-}
+export const formatHelpers = {
+  formatCurrency(amount: number, currency: string = 'PLN'): string {
+    return new Intl.NumberFormat('pl-PL', {
+      style: 'currency',
+      currency,
+    }).format(amount);
+  },
 
-export class ValidationError extends AppError {
-  constructor(message: string, public field?: string) {
-    super(message, 'VALIDATION_ERROR', 400)
-    this.name = 'ValidationError'
-  }
-}
+  formatDate(date: Date): string {
+    return new Intl.DateTimeFormat('pl-PL').format(date);
+  },
 
-export class ExtractionError extends AppError {
-  constructor(message: string) {
-    super(message, 'EXTRACTION_ERROR', 500)
-    this.name = 'ExtractionError'
-  }
+  parseDecimal(value: string): number {
+    // Obsługa przecinka i kropki dziesiętnej
+    const normalized = value.replace(',', '.');
+    return parseFloat(normalized);
+  },
+};
+```
+
+```typescript
+// lib/helpers/currency.helpers.ts
+
+export const currencyHelpers = {
+  normalizeCurrencySymbol(symbol: string): 'EUR' | 'USD' | 'PLN' | null {
+    const map: Record<string, 'EUR' | 'USD' | 'PLN'> = {
+      '€': 'EUR',
+      'EUR': 'EUR',
+      '$': 'USD',
+      'USD': 'USD',
+      'zł': 'PLN',
+      'PLN': 'PLN',
+    };
+
+    return map[symbol] || null;
+  },
+
+  getCurrencySymbol(currency: 'EUR' | 'USD' | 'PLN'): string {
+    const symbols = {
+      EUR: '€',
+      USD: '$',
+      PLN: 'zł',
+    };
+    return symbols[currency];
+  },
+};
+```
+
+### Hooks (src/lib/hooks)
+
+Hooks łączą UI z services. Zarządzają stanem i side effects.
+
+**Przykład:**
+
+```typescript
+// lib/hooks/usePricing.ts
+
+import { useState, useCallback } from 'react';
+import type { PricingConfig, ProductData, CalculatedPrice } from '@/types';
+import { priceCalculator } from '@/lib/services/pricing/price-calculator.service';
+import { DEFAULT_PRICING_CONFIG } from '@/lib/constants/pricing.constants';
+
+export function usePricing() {
+  const [config, setConfig] = useState<PricingConfig>(DEFAULT_PRICING_CONFIG);
+
+  const updateRate = useCallback((currency: 'EUR' | 'USD', rate: number) => {
+    setConfig((prev) => ({
+      ...prev,
+      rates: {
+        ...prev.rates,
+        [currency]: rate,
+      },
+    }));
+  }, []);
+
+  const updateMargin = useCallback((lengthThreshold: number, margin: number) => {
+    setConfig((prev) => ({
+      ...prev,
+      margins: {
+        ...prev.margins,
+        [lengthThreshold]: margin,
+      },
+    }));
+  }, []);
+
+  const calculatePrice = useCallback(
+    (product: ProductData): CalculatedPrice => {
+      return priceCalculator.calculateFinalPrice(product, config);
+    },
+    [config]
+  );
+
+  return {
+    config,
+    updateRate,
+    updateMargin,
+    calculatePrice,
+  };
 }
 ```
 
-### 9.2 Error Boundaries
+```typescript
+// lib/hooks/useExtraction.ts
 
-```tsx
-// src/components/organisms/ErrorBoundary.tsx
-import React from 'react'
-import { Alert, Button } from '@/components/atoms'
+import { useState, useCallback } from 'react';
+import type { RawInputDTO, ExtractedDataDTO } from '@/types';
+import { aiExtractionService } from '@/lib/services/extraction/ai-extraction.service';
 
-interface Props {
-  children: React.ReactNode
-  fallback?: React.ReactNode
+export function useExtraction() {
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractedData, setExtractedData] = useState<ExtractedDataDTO | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const extractData = useCallback(async (rawInput: RawInputDTO) => {
+    setIsExtracting(true);
+    setError(null);
+
+    try {
+      const result = await aiExtractionService.extractData(rawInput);
+      setExtractedData(result);
+      return result;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Błąd ekstrakcji';
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setIsExtracting(false);
+    }
+  }, []);
+
+  const clearExtraction = useCallback(() => {
+    setExtractedData(null);
+    setError(null);
+  }, []);
+
+  return {
+    isExtracting,
+    extractedData,
+    error,
+    extractData,
+    clearExtraction,
+  };
 }
+```
 
-interface State {
-  hasError: boolean
-  error: Error | null
-}
+---
 
-export class ErrorBoundary extends React.Component<Props, State> {
-  constructor(props: Props) {
-    super(props)
-    this.state = { hasError: false, error: null }
-  }
+## Warstwa danych
+
+### Supabase Client (src/db/supabase.client.ts)
+
+```typescript
+import { createClient } from '@supabase/supabase-js';
+import type { Database } from './database.types';
+
+const supabaseUrl = import.meta.env.SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.SUPABASE_KEY;
+
+export const supabaseClient = createClient<Database>(
+  supabaseUrl,
+  supabaseAnonKey
+);
+```
+
+### Database Types (src/db/database.types.ts)
+
+Typy generowane z Supabase CLI:
+
+```bash
+npx supabase gen types typescript --project-id YOUR_PROJECT_ID > src/db/database.types.ts
+```
+
+### API Endpoints (src/pages/api)
+
+API endpoints obsługują komunikację frontend-backend.
+
+**Przykład: Parse Endpoint**
+
+```typescript
+// src/pages/api/extraction/parse.ts
+
+import type { APIRoute } from 'astro';
+import { aiExtractionService } from '@/lib/services/extraction/ai-extraction.service';
+
+export const POST: APIRoute = async ({ request, locals }) => {
+  // Sprawdzenie autentykacji
+  const { data: { user } } = await locals.supabase.auth.getUser();
   
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error }
+  if (!user) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+    });
   }
-  
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('ErrorBoundary caught:', error, errorInfo)
+
+  try {
+    const body = await request.json();
+    const { rawText, defaultDate } = body;
+
+    // Wywołanie service
+    const extracted = await aiExtractionService.extractData({
+      text: rawText,
+      defaultDate,
+    });
+
+    return new Response(JSON.stringify(extracted), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (error) {
+    console.error('Extraction error:', error);
+    return new Response(
+      JSON.stringify({ error: 'Extraction failed' }),
+      { status: 500 }
+    );
   }
+};
+```
+
+**Przykład: History Save Endpoint**
+
+```typescript
+// src/pages/api/history/save.ts
+
+import type { APIRoute } from 'astro';
+import type { HistoryEntry } from '@/types';
+
+export const POST: APIRoute = async ({ request, locals }) => {
+  const { data: { user } } = await locals.supabase.auth.getUser();
   
-  render() {
-    if (this.state.hasError) {
-      if (this.props.fallback) {
-        return this.props.fallback
-      }
-      
-      return (
-        <div className="error-boundary">
-          <Alert variant="error">
-            <h2>Something went wrong</h2>
-            <p>{this.state.error?.message}</p>
-            <Button onClick={() => window.location.reload()}>
-              Reload Page
-            </Button>
-          </Alert>
+  if (!user) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+    });
+  }
+
+  try {
+    const historyEntry: HistoryEntry = await request.json();
+
+    const { data, error } = await locals.supabase
+      .from('history')
+      .insert({
+        user_id: user.id,
+        raw_input: historyEntry.rawInput,
+        extracted_data: historyEntry.extractedData,
+        edited_data: historyEntry.editedData,
+        final_pricelist: historyEntry.finalPricelist,
+        delta: historyEntry.delta,
+        created_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return new Response(JSON.stringify(data), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (error) {
+    console.error('History save error:', error);
+    return new Response(
+      JSON.stringify({ error: 'Failed to save history' }),
+      { status: 500 }
+    );
+  }
+};
+```
+
+### Middleware (src/middleware/index.ts)
+
+```typescript
+import { defineMiddleware } from 'astro:middleware';
+import { supabaseClient } from '../db/supabase.client';
+
+export const onRequest = defineMiddleware(async (context, next) => {
+  // Dodanie Supabase client do context.locals
+  context.locals.supabase = supabaseClient;
+
+  // Sprawdzenie sesji dla chronionych ścieżek
+  if (context.url.pathname.startsWith('/app')) {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    
+    if (!user) {
+      return context.redirect('/login');
+    }
+  }
+
+  return next();
+});
+```
+
+---
+
+## Flow użytkownika
+
+### User Journey - Multi-step Workflow
+
+```
+┌─────────────┐
+│   Landing   │
+│  /index     │
+└──────┬──────┘
+       │
+       ↓
+┌─────────────┐
+│    Login    │
+│   /login    │
+└──────┬──────┘
+       │
+       ↓
+┌─────────────────────────────────────────────────────┐
+│              Główna aplikacja (/app)                 │
+│                                                      │
+│  ┌────────────────────────────────────────────┐   │
+│  │ Step 1: Input + Pricing Configuration      │   │
+│  │ - Wklejenie surowego tekstu                │   │
+│  │ - Ustawienie daty domyślnej (jeśli brak)   │   │
+│  │ - Edycja kursów walut                      │   │
+│  │ - Edycja marż i transportu                 │   │
+│  │ - Edycja VAT                               │   │
+│  └─────────────────┬──────────────────────────┘   │
+│                    ↓                                │
+│  ┌────────────────────────────────────────────┐   │
+│  │ Step 2: Extraction + Editing               │   │
+│  │ - Automatyczna ekstrakcja przez AI         │   │
+│  │ - Wyświetlenie tabeli z danymi            │   │
+│  │ - Oznaczenie błędów walidacji              │   │
+│  │ - Edycja w tabeli                          │   │
+│  │ - Edycja w polu tekstowym                  │   │
+│  └─────────────────┬──────────────────────────┘   │
+│                    ↓                                │
+│  ┌────────────────────────────────────────────┐   │
+│  │ Step 3: Generation + Export                │   │
+│  │ - Popup z ostrzeżeniami (jeśli błędy)     │   │
+│  │ - Generowanie cennika                      │   │
+│  │ - Podgląd cennika                          │   │
+│  │ - Kopiowanie do schowka                    │   │
+│  │ - Eksport do pliku                         │   │
+│  │ - Zapis do historii                        │   │
+│  └────────────────────────────────────────────┘   │
+│                                                      │
+│  ┌────────────────────────────────────────────┐   │
+│  │ Historia (Sidebar - zawsze dostępny)       │   │
+│  │ - Lista poprzednich operacji               │   │
+│  │ - Filtrowanie i wyszukiwanie               │   │
+│  │ - Podgląd szczegółów                       │   │
+│  │ - Przywracanie danych                      │   │
+│  └────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────┘
+```
+
+### Główne komponenty strony /app/index.astro
+
+```typescript
+// Pseudokod struktury głównej strony
+
+<AppLayout>
+  <!-- Sidebar z historią -->
+  <HistorySidebar />
+
+  <!-- Główny content -->
+  <main>
+    <!-- Tabs dla kroków -->
+    <Tabs value={currentStep}>
+      <!-- Step 1: Input + Config -->
+      <TabsContent value="input">
+        <div className="grid grid-cols-2 gap-4">
+          <RawTextInput />
+          <PricingConfigForm />
         </div>
-      )
-    }
-    
-    return this.props.children
-  }
-}
+      </TabsContent>
+
+      <!-- Step 2: Extraction + Editing -->
+      <TabsContent value="editing">
+        <ExtractionProgress />
+        <DataTable />
+        <EditableTextField />
+      </TabsContent>
+
+      <!-- Step 3: Generation -->
+      <TabsContent value="generation">
+        <GenerationWarning />
+        <PriceListPreview />
+        <ExportActions />
+      </TabsContent>
+    </Tabs>
+  </main>
+</AppLayout>
 ```
 
-### 9.3 API Error Handling
+---
+
+## Typy i DTOs
+
+### Struktura types.ts
 
 ```typescript
-// src/lib/openrouter/errorHandler.ts
-import { APIError } from '@/lib/types/errors'
+// src/types.ts
 
-export class OpenrouterErrorHandler {
-  static handle(error: unknown): never {
-    if (error instanceof Response) {
-      switch (error.status) {
-        case 401:
-          throw new APIError('Invalid API key', 401)
-        case 429:
-          throw new APIError('Rate limit exceeded', 429)
-        case 500:
-          throw new APIError('Openrouter server error', 500)
-        default:
-          throw new APIError(`API error: ${error.statusText}`, error.status)
-      }
-    }
-    
-    if (error instanceof Error) {
-      throw new APIError(error.message, 500)
-    }
-    
-    throw new APIError('Unknown error', 500)
-  }
+// ============================================================================
+// ENTITIES (Database Models)
+// ============================================================================
+
+export interface User {
+  id: string;
+  email: string;
+  created_at: string;
+}
+
+export interface HistoryRecord {
+  id: string;
+  user_id: string;
+  raw_input: string;
+  extracted_data: ExtractedDataDTO;
+  edited_data: string;
+  final_pricelist: string;
+  delta: DeltaLog[];
+  created_at: string;
+}
+
+// ============================================================================
+// DTOs (Data Transfer Objects)
+// ============================================================================
+
+// Input Feature
+export interface RawInputDTO {
+  text: string;
+  defaultDate?: string;
+}
+
+// Pricing Feature
+export interface PricingConfigDTO {
+  rates: CurrencyRates;
+  margins: MarginConfig;
+  transportCosts: TransportConfig;
+  vatRate: number;
+}
+
+export interface CurrencyRates {
+  EUR: number;
+  USD: number;
+}
+
+export interface MarginConfig {
+  below60cm: number;  // Marża netto dla długości < 60cm
+  above60cm: number;  // Marża netto dla długości >= 60cm
+}
+
+export interface TransportConfig {
+  below60cm: number;  // Transport netto dla długości < 60cm
+  above60cm: number;  // Transport netto dla długości >= 60cm
+}
+
+// Extraction Feature
+export interface ExtractedDataDTO {
+  rows: ExtractedRow[];
+  metadata: {
+    dateExtracted?: string;
+    headerDetected: boolean;
+  };
+}
+
+export interface ExtractedRow {
+  group?: string;
+  name: string;
+  length?: number;         // cm
+  quantity?: number;       // szt
+  basePrice?: number;      // cena jednostkowa w walucie oryginalnej
+  currency?: 'EUR' | 'USD' | 'PLN';
+  availabilityDate?: string;
+  notes?: string;          // Kolumna UWAGI
+}
+
+// Calculation Feature
+export interface CalculatedPrice {
+  basePricePLN: number;    // Cena bazowa w PLN
+  marginNet: number;       // Marża netto
+  transportNet: number;    // Transport netto
+  totalNet: number;        // Suma netto
+  vatAmount: number;       // Kwota VAT
+  finalPrice: number;      // Cena końcowa brutto
+}
+
+export interface PriceListRow extends ExtractedRow {
+  calculated: CalculatedPrice;
+}
+
+// Validation Feature
+export interface ValidationError {
+  field: string;
+  message: string;
+  severity: 'error' | 'warning';
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  errors: Map<number, ValidationError[]>;  // index wiersza -> błędy
+}
+
+// Generation Feature
+export interface GeneratedPriceListDTO {
+  header: string[];
+  rows: string[][];
+  textFormat: string;      // Format tekstowy z tabulatorami
+}
+
+// History Feature
+export interface HistoryEntryDTO {
+  id: string;
+  rawInput: string;
+  extractedData: ExtractedDataDTO;
+  editedData: string;
+  finalPricelist: string;
+  delta: DeltaLog[];
+  createdAt: string;
+}
+
+// Metrics Feature
+export interface DeltaLog {
+  rowIndex: number;
+  field: string;
+  autoValue: any;
+  finalValue: any;
+  timestamp: string;
+}
+
+// ============================================================================
+// VIEW MODELS (for UI)
+// ============================================================================
+
+export interface TableRowViewModel extends PriceListRow {
+  index: number;
+  hasErrors: boolean;
+  errors: ValidationError[];
+  isEdited: boolean;
+}
+
+export interface HistoryItemViewModel {
+  id: string;
+  preview: string;         // Pierwsze 100 znaków raw input
+  itemCount: number;       // Liczba pozycji
+  createdAt: string;
+  formattedDate: string;   // Sformatowana data dla UI
+}
+
+// ============================================================================
+// CONSTANTS & ENUMS
+// ============================================================================
+
+export type Currency = 'EUR' | 'USD' | 'PLN';
+
+export enum ProcessStep {
+  INPUT = 'input',
+  EDITING = 'editing',
+  GENERATION = 'generation',
+}
+
+export enum ValidationSeverity {
+  ERROR = 'error',
+  WARNING = 'warning',
 }
 ```
 
 ---
 
-## 10. Performance Optimizations
+## Kluczowe decyzje architektoniczne
 
-### 10.1 Code Splitting
+### 1. Separation of Concerns
 
-```tsx
-// Lazy load heavy components
-import { lazy, Suspense } from 'react'
+**Decyzja:** Ścisła separacja UI, logiki biznesowej i danych.
 
-const HistoryPanel = lazy(() => import('@/features/history/components/HistoryPanel'))
+**Uzasadnienie:**
+- Ułatwia testy (można testować services niezależnie)
+- Zmniejsza coupling
+- Umożliwia wymianę implementacji (np. zmiana AI providera)
 
-export function Dashboard() {
-  return (
-    <Suspense fallback={<Spinner />}>
-      <HistoryPanel />
-    </Suspense>
-  )
-}
-```
+**Implementacja:**
+- UI components nie wywołują bezpośrednio API
+- Services nie zależą od React/Astro
+- Hooks jako bridge między UI a services
 
-### 10.2 Memoization
+### 2. Atomic Design dla UI
 
-```tsx
-// Expensive calculations
-import { useMemo } from 'react'
-import { PriceCalculator } from '@/features/pricing/services/priceCalculator'
+**Decyzja:** Hierarchiczna organizacja komponentów UI.
 
-export function useComputedRows() {
-  const rows = useEditorStore(state => state.rows)
-  const config = useConfigStore(state => state.config)
-  
-  const computedRows = useMemo(
-    () => PriceCalculator.recalculateAll(rows, config),
-    [rows, config]
-  )
-  
-  return computedRows
-}
-```
+**Uzasadnienie:**
+- Maksymalna reużywalność
+- Łatwe utrzymanie spójności designu
+- Ułatwione tworzenie nowych features
 
-### 10.3 Debouncing
+**Implementacja:**
+- Atoms: podstawowe komponenty (Button, Input)
+- Molecules: kombinacje atoms
+- Organisms: złożone sekcje
+- Features: domain-specific komponenty
 
-```tsx
-// src/hooks/useDebounce.ts
-import { useEffect, useState } from 'react'
+### 3. Feature-based Split
 
-export function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState(value)
-  
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value)
-    }, delay)
-    
-    return () => clearTimeout(handler)
-  }, [value, delay])
-  
-  return debouncedValue
-}
-```
+**Decyzja:** Kod organizowany wokół funkcjonalności biznesowych.
 
-### 10.4 Virtual Scrolling (Future)
+**Uzasadnienie:**
+- Łatwiejsze znajdowanie kodu
+- Lepsze skalowanie zespołu (developerzy mogą pracować nad różnymi features)
+- Ułatwione dodawanie nowych funkcji
 
-For large datasets (100+ rows):
+**Implementacja:**
+- Każdy feature ma komponenty, services, hooks
+- Jasne granice między features
+- Możliwość wydzielenia feature do oddzielnego pakietu
 
-```tsx
-import { useVirtualizer } from '@tanstack/react-virtual'
+### 4. Type Safety na wszystkich poziomach
 
-// Will implement if performance issues with large data
-```
+**Decyzja:** TypeScript wszędzie + generowane typy z Supabase.
 
----
+**Uzasadnienie:**
+- Catch błędów w compile time
+- Lepsze IDE support
+- Self-documenting code
 
-## 11. Testing Strategy
+**Implementacja:**
+- Typy generowane z Supabase dla database entities
+- Explicit DTOs dla API communication
+- View Models dla UI
 
-### 11.1 Test Pyramid
+### 5. Service Pattern dla Business Logic
 
-```
-         ┌────────────┐
-        /    E2E       \      ← Few (critical user flows)
-       /──────────────\
-      /  Integration    \     ← Some (feature integration)
-     /──────────────────\
-    /      Unit          \    ← Many (business logic)
-   /──────────────────────\
-```
+**Decyzja:** Logika biznesowa w services jako pure functions lub obiekty.
 
-### 11.2 Unit Tests (Vitest)
+**Uzasadnienie:**
+- Testowalne w izolacji
+- Reużywalne
+- Niezależne od frameworka
 
-**Focus:** Pure functions (services, utilities)
+**Implementacja:**
+- Services eksportują obiekty z metodami
+- Dependency injection przez parametry
+- Brak side effects poza kontrolowanymi (API calls)
 
-```typescript
-// src/features/pricing/services/__tests__/currencyConverter.test.ts
-import { describe, it, expect } from 'vitest'
-import { currencyConverter } from '../currencyConverter'
+### 6. Hooks jako Bridge
 
-describe('CurrencyConverter', () => {
-  const config = {
-    eurRate: 4.30,
-    usdRate: 3.80
-  }
-  
-  it('should convert EUR to PLN', () => {
-    const result = currencyConverter.toPLN(100, 'EUR', config)
-    expect(result).toBe(430)
-  })
-  
-  it('should convert USD to PLN', () => {
-    const result = currencyConverter.toPLN(100, 'USD', config)
-    expect(result).toBe(380)
-  })
-  
-  it('should return same value for PLN', () => {
-    const result = currencyConverter.toPLN(100, 'PLN', config)
-    expect(result).toBe(100)
-  })
-})
-```
+**Decyzja:** React hooks łączą UI z services.
 
-### 11.3 Integration Tests (Vitest + Testing Library)
+**Uzasadnienie:**
+- Separation of concerns
+- Reużywalne logic
+- Łatwe do testowania (można mockować services)
 
-**Focus:** Feature workflows, API integration
+**Implementacja:**
+- Hooks zarządzają stanem
+- Hooks wywołują services
+- Components używają hooks, nie services bezpośrednio
 
-```typescript
-// src/features/extraction/__tests__/extraction.integration.test.ts
-import { describe, it, expect, vi } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
-import { useExtraction } from '../hooks/useExtraction'
-import { OpenrouterClient } from '@/lib/openrouter/client'
+### 7. Multi-step Workflow w jednej stronie
 
-vi.mock('@/lib/openrouter/client')
+**Decyzja:** Główna aplikacja jako single page z tabs/steps.
 
-describe('Extraction Integration', () => {
-  it('should extract data and update editor store', async () => {
-    // Mock API response
-    vi.mocked(OpenrouterClient.chatCompletion).mockResolvedValue({
-      choices: [{
-        message: {
-          content: JSON.stringify({
-            items: [
-              {
-                name: 'Rosa Grand Prix',
-                lengthCm: 60,
-                quantity: 10,
-                basePrice: 2.50,
-                currency: 'EUR'
-              }
-            ]
-          })
-        }
-      }]
-    })
-    
-    const { result } = renderHook(() => useExtraction())
-    
-    result.current.extract('Rosa Grand Prix 60cm 10 szt 2.50€')
-    
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
-      expect(result.current.data).toHaveLength(1)
-      expect(result.current.data[0].name).toBe('Rosa Grand Prix')
-    })
-  })
-})
-```
+**Uzasadnienie:**
+- Lepsza UX (brak przeładowań)
+- Stan aplikacji w pamięci
+- Łatwe przejścia między krokami
 
-### 11.4 E2E Tests (Playwright - Future)
+**Implementacja:**
+- Tabs component z krokami
+- Shared state przez Context lub hooks
+- Historia w sidebar zawsze widoczna
 
-**Focus:** Critical user journeys
+### 8. Edytowalne pole tekstowe jako fallback
 
-```typescript
-// __tests__/e2e/processing-flow.spec.ts
-import { test, expect } from '@playwright/test'
+**Decyzja:** Poza tabelą edycyjną, dodanie pola tekstowego z pełną zawartością.
 
-test('complete processing flow', async ({ page }) => {
-  // Login
-  await page.goto('/login')
-  await page.fill('[name="email"]', 'test@example.com')
-  await page.fill('[name="password"]', 'password')
-  await page.click('button[type="submit"]')
-  
-  // Navigate to dashboard
-  await expect(page).toHaveURL('/dashboard')
-  
-  // Paste raw input
-  await page.fill('textarea[name="raw-input"]', 'Rosa Grand Prix 60cm 10 szt 2.50€')
-  
-  // Process
-  await page.click('button:has-text("Process")')
-  
-  // Wait for extraction
-  await expect(page.locator('.editor')).toBeVisible()
-  
-  // Verify results
-  const editorContent = await page.textContent('.editor')
-  expect(editorContent).toContain('Rosa Grand Prix')
-  
-  // Generate output
-  await page.click('button:has-text("Generate")')
-  
-  // Verify output
-  await expect(page.locator('.output')).toBeVisible()
-})
-```
+**Uzasadnienie:**
+- Maksymalna elastyczność dla użytkownika
+- Szybkie korekty bez klikania w komórki
+- Backup na wypadek problemów z tabelą
+
+**Implementacja:**
+- Textarea z zawartością TSV (tab-separated values)
+- Synchronizacja dwukierunkowa z tabelą
+- Walidacja przy każdej zmianie
+
+### 9. Logowanie delt dla Quality Metrics
+
+**Decyzja:** Zapisywanie różnic między auto-extraction a finalną wersją.
+
+**Uzasadnienie:**
+- Mierzenie skuteczności AI
+- Input do ulepszeń
+- Możliwość analizy najczęstszych błędów
+
+**Implementacja:**
+- Delta logger service
+- Zapis do bazy przy generowaniu cennika
+- Dashboard metryk (future feature)
+
+### 10. Supabase jako Backend
+
+**Decyzja:** Supabase dla auth, database, BaaS.
+
+**Uzasadnienie:**
+- Szybki start (mniej boilerplate)
+- Built-in auth
+- PostgreSQL (relational + JSON support)
+- SDK dla TypeScript
+
+**Implementacja:**
+- Supabase client w middleware
+- Row Level Security dla danych użytkownika
+- Generated types dla type safety
 
 ---
 
-## 12. Deployment Architecture
+## Podsumowanie
 
-### 12.1 Development Environment
+Architektura InflorAI została zaprojektowana z myślą o:
 
-```
-Local Development:
-┌──────────────────────────────────────┐
-│  Developer Machine                   │
-│                                      │
-│  ┌────────────┐    ┌──────────────┐ │
-│  │ Astro Dev  │    │   Supabase   │ │
-│  │  Server    │───▶│    Local     │ │
-│  │ :4321      │    │  :54321      │ │
-│  └────────────┘    └──────────────┘ │
-│                                      │
-│  Environment:                        │
-│  - .env.local                        │
-│  - VITE_SUPABASE_URL (local)        │
-│  - OPENROUTER_API_KEY               │
-└──────────────────────────────────────┘
-```
+✅ **Modularności** - każdy feature jest niezależny
+✅ **Testowalności** - services i helpers jako pure functions
+✅ **Skalowalności** - łatwe dodawanie nowych funkcji
+✅ **Maintainability** - jasna struktura i separacja concerns
+✅ **Type Safety** - TypeScript na każdym poziomie
+✅ **Developer Experience** - intuicyjna organizacja kodu
 
-### 12.2 Production Environment
+### Następne kroki implementacji:
 
-```
-Production (DigitalOcean + Docker):
-┌──────────────────────────────────────────────────┐
-│  DigitalOcean Droplet                            │
-│                                                  │
-│  ┌────────────────────────────────────────────┐ │
-│  │  Docker Container                          │ │
-│  │                                            │ │
-│  │  ┌──────────────┐     ┌────────────────┐  │ │
-│  │  │  Nginx       │────▶│  Astro Static  │  │ │
-│  │  │  (Reverse    │     │  + Node Server │  │ │
-│  │  │   Proxy)     │     │                │  │ │
-│  │  └──────────────┘     └────────────────┘  │ │
-│  └────────────────────────────────────────────┘ │
-│                                                  │
-│           │                        │             │
-│           ↓                        ↓             │
-│  ┌─────────────────┐    ┌──────────────────┐   │
-│  │  Supabase       │    │   Openrouter.ai  │   │
-│  │  (Cloud)        │    │   (Cloud)        │   │
-│  └─────────────────┘    └──────────────────┘   │
-└──────────────────────────────────────────────────┘
-```
-
-### 12.3 Docker Configuration
-
-```dockerfile
-# Dockerfile
-FROM node:20-alpine AS builder
-
-WORKDIR /app
-
-# Install dependencies
-COPY package*.json ./
-RUN npm ci
-
-# Copy source
-COPY . .
-
-# Build
-ENV NODE_ENV=production
-RUN npm run build
-
-# Production image
-FROM node:20-alpine AS runner
-
-WORKDIR /app
-
-# Copy built assets
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
-
-ENV HOST=0.0.0.0
-ENV PORT=4321
-
-EXPOSE 4321
-
-CMD ["node", "./dist/server/entry.mjs"]
-```
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-
-services:
-  app:
-    build: .
-    ports:
-      - "4321:4321"
-    environment:
-      - NODE_ENV=production
-      - PUBLIC_SUPABASE_URL=${PUBLIC_SUPABASE_URL}
-      - PUBLIC_SUPABASE_ANON_KEY=${PUBLIC_SUPABASE_ANON_KEY}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-    restart: unless-stopped
-  
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - app
-    restart: unless-stopped
-```
-
-### 12.4 CI/CD Pipeline (GitHub Actions)
-
-```yaml
-# .github/workflows/deploy.yml
-name: Deploy to Production
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20'
-          
-      - name: Install dependencies
-        run: npm ci
-        
-      - name: Run tests
-        run: npm run test
-        
-      - name: Build
-        run: npm run build
-        env:
-          PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          
-      - name: Build Docker image
-        run: docker build -t inflorai:latest .
-        
-      - name: Push to DigitalOcean Registry
-        run: |
-          echo "${{ secrets.DO_API_TOKEN }}" | docker login registry.digitalocean.com -u ${{ secrets.DO_API_TOKEN }} --password-stdin
-          docker tag inflorai:latest registry.digitalocean.com/inflorai/app:latest
-          docker push registry.digitalocean.com/inflorai/app:latest
-          
-      - name: Deploy to Droplet
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.DROPLET_IP }}
-          username: ${{ secrets.DROPLET_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd /opt/inflorai
-            docker-compose pull
-            docker-compose up -d
-            docker system prune -f
-```
+1. **Setup Supabase** - inicjalizacja bazy danych i auth
+2. **Migracje DB** - stworzenie tabel (users, history)
+3. **Atomic Components** - implementacja atoms i molecules
+4. **Core Services** - price calculator, AI extraction
+5. **Feature Components** - główne features (input, editing, generation)
+6. **Integration** - połączenie wszystkich części
+7. **Testing** - testy jednostkowe i integracyjne
+8. **Deployment** - CI/CD + hosting
 
 ---
 
-## 13. Security Considerations
-
-### 13.1 Environment Variables
-
-```bash
-# .env.example
-# Supabase (Public - safe to expose)
-PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-
-# Openrouter (Private - server-side only)
-OPENROUTER_API_KEY=your-api-key
-
-# App
-NODE_ENV=production
-```
-
-**Important:**
-- ✅ Supabase anon key CAN be public (protected by RLS)
-- ❌ Openrouter API key MUST stay server-side
-- ❌ NEVER commit .env files to git
-
-### 13.2 Row Level Security (RLS)
-
-All Supabase tables MUST have RLS enabled:
-
-```sql
-ALTER TABLE processing_history ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can only see their own data"
-  ON processing_history
-  FOR SELECT
-  USING (auth.uid() = user_id);
-```
-
-### 13.3 Input Sanitization
-
-```typescript
-// src/utils/validators.ts
-import DOMPurify from 'isomorphic-dompurify'
-
-export class InputValidator {
-  /**
-   * Sanitize user input to prevent XSS
-   */
-  static sanitize(input: string): string {
-    return DOMPurify.sanitize(input, {
-      ALLOWED_TAGS: [],  // Strip all HTML
-      KEEP_CONTENT: true
-    })
-  }
-  
-  /**
-   * Validate max length
-   */
-  static validateLength(input: string, max: number): boolean {
-    return input.length <= max
-  }
-}
-```
-
-### 13.4 API Rate Limiting
-
-```typescript
-// src/lib/openrouter/rateLimit.ts
-export class RateLimiter {
-  private calls: number[] = []
-  
-  constructor(
-    private maxCalls: number,
-    private windowMs: number
-  ) {}
-  
-  canMakeRequest(): boolean {
-    const now = Date.now()
-    
-    // Remove old calls outside window
-    this.calls = this.calls.filter(time => now - time < this.windowMs)
-    
-    return this.calls.length < this.maxCalls
-  }
-  
-  recordRequest(): void {
-    this.calls.push(Date.now())
-  }
-}
-
-// Usage: max 10 calls per minute
-const limiter = new RateLimiter(10, 60000)
-```
-
----
-
-## 14. Monitoring & Observability
-
-### 14.1 Logging Strategy
-
-```typescript
-// src/lib/logger.ts
-type LogLevel = 'debug' | 'info' | 'warn' | 'error'
-
-class Logger {
-  log(level: LogLevel, message: string, meta?: Record<string, unknown>) {
-    const timestamp = new Date().toISOString()
-    
-    const logEntry = {
-      timestamp,
-      level,
-      message,
-      ...meta
-    }
-    
-    // Development: console
-    if (import.meta.env.DEV) {
-      console[level === 'debug' ? 'log' : level](logEntry)
-    }
-    
-    // Production: send to monitoring service (future)
-    if (import.meta.env.PROD) {
-      // TODO: Send to Sentry, Datadog, etc.
-    }
-  }
-  
-  debug(message: string, meta?: Record<string, unknown>) {
-    this.log('debug', message, meta)
-  }
-  
-  info(message: string, meta?: Record<string, unknown>) {
-    this.log('info', message, meta)
-  }
-  
-  warn(message: string, meta?: Record<string, unknown>) {
-    this.log('warn', message, meta)
-  }
-  
-  error(message: string, error?: Error, meta?: Record<string, unknown>) {
-    this.log('error', message, { ...meta, error: error?.message, stack: error?.stack })
-  }
-}
-
-export const logger = new Logger()
-```
-
-### 14.2 Delta Tracking
-
-```typescript
-// src/features/observability/services/deltaCalculator.ts
-import type { ExtractedRow } from '@/features/extraction/types'
-
-export class DeltaCalculator {
-  /**
-   * Calculate differences between automatic extraction and final edited version
-   */
-  static calculate(
-    autoRows: ExtractedRow[],
-    finalRows: ExtractedRow[]
-  ): RowDelta[] {
-    const deltas: RowDelta[] = []
-    
-    for (let i = 0; i < autoRows.length; i++) {
-      const auto = autoRows[i]
-      const final = finalRows[i]
-      
-      const changes: Record<string, { from: unknown; to: unknown }> = {}
-      
-      // Compare each field
-      for (const key in auto) {
-        if (auto[key] !== final[key]) {
-          changes[key] = {
-            from: auto[key],
-            to: final[key]
-          }
-        }
-      }
-      
-      if (Object.keys(changes).length > 0) {
-        deltas.push({
-          rowId: auto.id,
-          changes
-        })
-      }
-    }
-    
-    return deltas
-  }
-}
-```
-
-### 14.3 Metrics Collection
-
-```typescript
-// src/features/observability/services/metricsCollector.ts
-export class MetricsCollector {
-  /**
-   * Collect processing metrics
-   */
-  static async collectProcessingMetrics(data: {
-    userId: string
-    processingId: string
-    totalRows: number
-    autoCorrectRows: number  // Rows with no changes
-    editedRows: number       // Rows that were manually edited
-    deletedRows: number      // Rows that were removed
-    processingTimeMs: number
-    extractionTimeMs: number
-  }) {
-    // Calculate accuracy
-    const accuracy = (data.autoCorrectRows / data.totalRows) * 100
-    
-    // Log metrics
-    logger.info('Processing completed', {
-      ...data,
-      accuracy: `${accuracy.toFixed(2)}%`
-    })
-    
-    // Store in database for analysis
-    await MetricsApi.save({
-      user_id: data.userId,
-      processing_id: data.processingId,
-      total_rows: data.totalRows,
-      auto_correct_rows: data.autoCorrectRows,
-      edited_rows: data.editedRows,
-      deleted_rows: data.deletedRows,
-      accuracy_percent: accuracy,
-      processing_time_ms: data.processingTimeMs,
-      extraction_time_ms: data.extractionTimeMs,
-      created_at: new Date().toISOString()
-    })
-  }
-}
-```
-
----
-
-## 15. Future Enhancements
-
-### 15.1 Roadmap Items (Post-MVP)
-
-#### Phase 2 (1-2 miesiące):
-- **Advanced Table Editor**: Edytowalna tabela zamiast pola tekstowego z tabulatorami
-- **Add/Duplicate/Delete Rows**: Zarządzanie wierszami
-- **Column Sorting & Filtering**: Sortowanie i filtrowanie w tabeli
-- **Export Formats**: CSV, Excel oprócz tekstu
-
-#### Phase 3 (2-3 miesiące):
-- **Custom AI Models**: Wybór modelu (GPT-4, Claude, Gemini)
-- **Fine-tuning**: Dostrajanie modelu na historycznych danych użytkownika
-- **Batch Processing**: Przetwarzanie wielu ofert jednocześnie
-- **Email Integration**: Import ofert z emaila
-
-#### Phase 4 (3-6 miesięcy):
-- **Multi-user**: Zespoły, współdzielenie cenników
-- **API**: REST API dla integracji
-- **Mobile App**: React Native lub PWA
-- **Advanced Analytics**: Dashboard z metrykami, trendy
-
-### 15.2 Scalability Considerations
-
-Obecna architektura jest przygotowana na wzrost:
-
-- **Horizontal Scaling**: Docker containers na wielu serwerach
-- **Database**: PostgreSQL skaluje się dobrze, możliwy sharding w przyszłości
-- **Caching**: Redis dla cache'owania wyników AI
-- **CDN**: Cloudflare dla statycznych assets
-- **Load Balancer**: Nginx dla load balancing
-
----
-
-## 16. Summary
-
-### 16.1 Key Architectural Decisions
-
-| Decision | Rationale |
-|----------|-----------|
-| **Astro + React Islands** | Optimal performance, minimal JS, good SEO potential |
-| **Zustand** | Simple global state, no boilerplate |
-| **React Query** | Excellent server state management, caching |
-| **Supabase** | Complete backend solution (auth + db + RLS) |
-| **Openrouter** | Access to multiple AI models, cost control |
-| **Feature-First Structure** | Scalability, maintainability, clear boundaries |
-| **Atomic Design** | Reusable components, consistent UI |
-| **Pure Functions** | Testability, predictability |
-
-### 16.2 Non-Functional Requirements
-
-- **Performance**: < 2s initial load, < 500ms for calculations
-- **Availability**: 99.5% uptime target
-- **Security**: RLS, input sanitization, env secrets
-- **Maintainability**: Clear architecture, tests, documentation
-- **Scalability**: Prepared for 100+ users initially
-
-### 16.3 Success Metrics
-
-**Technical:**
-- Lighthouse score > 90
-- Test coverage > 70%
-- Build time < 1 minute
-- Bundle size < 500 KB
-
-**Business (from PRD):**
-- 90% automatic extraction accuracy
-- 50% time reduction vs manual process
-- < 10% rows requiring manual correction
-
----
-
-## Appendix A: Quick Start Guide
-
-```bash
-# Clone repository
-git clone https://github.com/your-org/inflorai.git
-cd inflorai
-
-# Install dependencies
-npm install
-
-# Setup environment
-cp .env.example .env.local
-# Edit .env.local with your keys
-
-# Start Supabase locally (optional)
-npx supabase start
-
-# Run development server
-npm run dev
-
-# Open browser
-open http://localhost:4321
-```
-
-## Appendix B: Useful Commands
-
-```bash
-# Development
-npm run dev              # Start dev server
-npm run build            # Build for production
-npm run preview          # Preview production build
-
-# Testing
-npm run test             # Run unit tests
-npm run test:watch       # Watch mode
-npm run test:coverage    # Coverage report
-
-# Database
-npx supabase migration new <name>  # Create migration
-npx supabase db push              # Apply migrations
-npx supabase gen types typescript # Generate types
-
-# Docker
-docker-compose up        # Start all services
-docker-compose down      # Stop all services
-docker-compose logs -f   # View logs
-```
-
----
-
-**Document Version:** 1.0  
-**Last Updated:** 2025-01-20  
-**Author:** Architecture Team  
-**Status:** Draft for Review
+**Dokument stworzony:** 2025-10-20
+**Wersja:** 1.0
+**Status:** Draft do review
 

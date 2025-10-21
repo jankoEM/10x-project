@@ -1,7 +1,7 @@
 # Dokument wymagań produktu (PRD) - InflorAI
 
 ## 1. Przegląd produktu
-InflorAI to narzędzie webowe, które automatyzuje konwersję niejednolitego tekstu z ofert resztkowych dostawców kwiatów na spójny cennik. Aplikacja umożliwia: wklejenie surowych danych, ustawienie globalnych parametrów cenowych, automatyczną ekstrakcję i przeliczenie pozycji, ręczną weryfikację w edytowalnej tabeli oraz wygenerowanie finalnego cennika w prostym formacie tekstowym (z tabulatorami). Wersja MVP obejmuje prostą autentykację i moduł historii zapytań.
+InflorAI to narzędzie webowe, które automatyzuje konwersję niejednolitego tekstu z ofert resztkowych dostawców kwiatów na spójny cennik. Aplikacja umożliwia: wklejenie surowych danych, ustawienie globalnych parametrów cenowych, automatyczną ekstrakcję i przeliczenie pozycji, ręczną weryfikację w edytowalnym polu tekstowym oraz wygenerowanie finalnego cennika w prostym formacie tekstowym (z tabulatorami). Wersja MVP obejmuje prostą autentykację i moduł historii zapytań.
 
 Kontekst biznesowy: przedsiębiorcy w branży florystycznej regularnie otrzymują oferty z Holandii o nieustandaryzowanych formatach. Ręczna praca nad czyszczeniem danych, przeliczaniem cen (waluty, marża, transport, VAT) i przygotowaniem cennika jest czasochłonna i podatna na błędy. InflorAI skraca ten proces oraz zmniejsza ryzyko pomyłek.
 
